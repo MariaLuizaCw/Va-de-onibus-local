@@ -1,0 +1,10 @@
+node_modules
+logs
+*.log
+polling_logs.txt
+.env
+.DS_Store
+coverage
+dist
+.svelte-kit
+build
