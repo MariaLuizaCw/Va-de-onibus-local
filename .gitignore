@@ -8,3 +8,5 @@ coverage
 dist
 .svelte-kit
 build
+.env
+db_data

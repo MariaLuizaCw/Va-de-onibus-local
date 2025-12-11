@@ -1,0 +1,47 @@
+version: '3.9'
+
+services:
+  db:
+    image: supabase/postgres:15.1.0.46-rc0
+    container_name: vadeonibus-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-postgres}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-vadeonibus}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - ./db_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vadeonibus-backend
+    depends_on:
+      - db
+    environment:
+      # example envs for connecting to Postgres
+      DATABASE_HOST: ${DB_HOST:-db}
+      DATABASE_PORT: ${DB_PORT:-5432}
+      DATABASE_USER: ${DB_USER:-vadeonibus}
+      DATABASE_PASSWORD: ${DB_PASSWORD:-vadeonibus}
+      DATABASE_NAME: ${DB_NAME:-vadeonibus}
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vadeonibus-frontend
+    depends_on:
+      - backend
+    environment:
+      # Point frontend to backend inside Docker network
+      VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:${BACKEND_PORT:-3001}}
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+
+volumes:
+  db_data:
