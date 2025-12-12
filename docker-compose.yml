@@ -5,11 +5,11 @@ services:
     image: supabase/postgres:15.1.0.46-rc0
     container_name: vadeonibus-db
     environment:
-      POSTGRES_DB: ${DB_NAME:-postgres}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-vadeonibus}
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      - "${DB_PORT}:5432"
     volumes:
       - ./db_data:/var/lib/postgresql/data
 
@@ -22,26 +22,17 @@ services:
       - db
     environment:
       # example envs for connecting to Postgres
-      DATABASE_HOST: ${DB_HOST:-db}
-      DATABASE_PORT: ${DB_PORT:-5432}
-      DATABASE_USER: ${DB_USER:-vadeonibus}
-      DATABASE_PASSWORD: ${DB_PASSWORD:-vadeonibus}
-      DATABASE_NAME: ${DB_NAME:-vadeonibus}
-    ports:
-      - "${BACKEND_PORT:-3001}:3001"
+      DATABASE_HOST: ${DB_HOST}
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${DB_USER}
+      DATABASE_PASSWORD: ${DB_PASSWORD}
+      DATABASE_NAME: ${DB_NAME}
+      API_TIMEZONE: ${API_TIMEZONE}
+      CATCHUP_HOURS: ${CATCHUP_HOURS}
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: vadeonibus-frontend
-    depends_on:
-      - backend
-    environment:
-      # Point frontend to backend inside Docker network
-      VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:${BACKEND_PORT:-3001}}
+      
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      - "${BACKEND_PORT}:3001"
 
 volumes:
   db_data:
