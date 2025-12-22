@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { fetchGPSData } = require('./fetcher');
-const { ensureFuturePartitions, saveRioOnibusSnapshot, loadLatestRioOnibusSnapshot } = require('./database');
+const { ensureFuturePartitions, saveRioOnibusSnapshot, loadLatestRioOnibusSnapshot, generateSentidoCoverageReport } = require('./database');
 const { getRioOnibus, getLineLastPositions, replaceRioOnibusSnapshot } = require('./rioOnibusStore');
 
 const app = express();
@@ -22,9 +22,14 @@ app.get('/rio_onibus', (req, res) => {
 });
 
 // Ensure future partitions are created periodically
+const PARTITION_CHECK_INTERVAL_MS = Number(process.env.PARTITION_CHECK_INTERVAL_MS) || 86400000;
 ensureFuturePartitions();
-// Run once per day
-setInterval(ensureFuturePartitions, 24 * 60 * 60 * 1000);
+setInterval(ensureFuturePartitions, PARTITION_CHECK_INTERVAL_MS);
+
+// Generate sentido coverage report daily
+const COVERAGE_REPORT_INTERVAL_MS = Number(process.env.COVERAGE_REPORT_INTERVAL_MS) || 86400000;
+generateSentidoCoverageReport();
+setInterval(generateSentidoCoverageReport, COVERAGE_REPORT_INTERVAL_MS);
 
 // Load snapshot on startup
 loadLatestRioOnibusSnapshot()
