@@ -40,7 +40,6 @@ app.get('/rio_onibus', (req, res) => {
                 if (!pos) {
                     result[ordemKey] = null;
                 } else {
-                    const cacheKey = `${String(linha)}|${String(ordemKey)}|${Number(pos.datahora)}`;
                     const metrics = computeSentidoMetricsForPoint(linha, pos.longitude, pos.latitude);
                     const best = metrics && metrics.best ? metrics.best : null;
 
