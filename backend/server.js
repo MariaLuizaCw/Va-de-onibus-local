@@ -2,11 +2,76 @@ const express = require('express');
 const cors = require('cors');
 const { fetchGPSData } = require('./fetcher');
 const { ensureFuturePartitions } = require('./database');
+const { getRioOnibus, getLineLastPositions, getLastPosition } = require('./rioOnibusStore');
+const { loadItinerarioIntoMemory } = require('./itinerarioStore');
+const { chooseSentidoForPoint } = require('./itinerarioStore');
 
 const app = express();
 
+const sentidoCache = new Map();
+
 app.use(cors());
 app.use(express.json());
+
+(async () => {
+    try {
+        await loadItinerarioIntoMemory();
+    } catch (err) {
+        console.error('[itinerario] failed to load into memory', err);
+    }
+})();
+
+app.get('/rio_onibus', (req, res) => {
+    const { linha, ordem } = req.query;
+
+    if (linha != null && ordem != null) {
+        return res.json({ linha: String(linha), ordem: String(ordem), ultima: getLastPosition(linha, ordem) });
+    }
+
+    if (linha != null) {
+        const ordens = getLineLastPositions(linha);
+
+        const entries = Object.entries(ordens);
+
+        (async () => {
+            const result = Object.create(null);
+
+            for (let i = 0; i < entries.length; i++) {
+                const [ordemKey, pos] = entries[i];
+
+                if (!pos) {
+                    result[ordemKey] = null;
+                } else {
+                    const cacheKey = `${String(linha)}|${String(ordemKey)}|${Number(pos.datahora)}`;
+                    let sentidoInfo = sentidoCache.get(cacheKey);
+
+                    if (!sentidoInfo) {
+                        sentidoInfo = chooseSentidoForPoint(linha, pos.longitude, pos.latitude);
+                        sentidoCache.set(cacheKey, sentidoInfo);
+                    }
+
+                    result[ordemKey] = {
+                        ...pos,
+                        sentido: sentidoInfo ? sentidoInfo.sentido : null
+                    };
+                }
+
+                if (i % 25 === 24) {
+                    await new Promise((resolve) => setImmediate(resolve));
+                }
+            }
+
+            return res.json({ linha: String(linha), ordens: result });
+        })().catch((err) => {
+            console.error('[rio_onibus] failed to compute sentido', err);
+            return res.status(500).json({ error: 'failed to compute sentido' });
+        });
+
+        return;
+    }
+
+    return res.json(getRioOnibus());
+});
 
 // Ensure future partitions are created periodically
 ensureFuturePartitions();

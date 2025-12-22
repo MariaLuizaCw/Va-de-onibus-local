@@ -1,8 +1,10 @@
 const axios = require('axios');
 const { saveRecordsToDb, ensureFuturePartitions } = require('./database');
 const { API_TIMEZONE, formatDateInTimeZone } = require('./utils');
+const { addPositions } = require('./rioOnibusStore');
 
-async function fetchGPSData(windowInMinutes = 3) {
+async function fetchGPSData(windowInMinutes = 3, options = {}) {
+    const { updateInMemoryStore = true } = options;
     const now = new Date();
 
     // overlap window configurável em minutos; default 3
@@ -29,6 +31,7 @@ async function fetchGPSData(windowInMinutes = 3) {
         });
 
         const records = response.data;
+        if (updateInMemoryStore) addPositions(records);
         await saveRecordsToDb(records);
 
         const successMsg = `Success! Fetched ${records.length} records.`;
