@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { API_TIMEZONE, formatDateYYYYMMDDInTimeZone } = require('./utils');
 
 const dbPool = new Pool({
     host: process.env.DATABASE_HOST,
@@ -75,6 +76,67 @@ function formatDateYYYYMMDD(date) {
     return `${year}-${month}-${day}`;
 }
 
+async function cleanupOldPartitions(retentionDays = 7) {
+    const todaySpStr = formatDateYYYYMMDDInTimeZone(new Date(), API_TIMEZONE);
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+    const cutoffSpStr = formatDateYYYYMMDDInTimeZone(cutoffDate, API_TIMEZONE);
+
+    console.log(`[partitions] cleanup start tz=${API_TIMEZONE} today=${todaySpStr} retentionDays=${retentionDays} cutoff=${cutoffSpStr}`);
+
+    let result;
+    try {
+        result = await dbPool.query(
+            `
+            SELECT tablename
+            FROM pg_tables
+            WHERE schemaname = 'public'
+              AND tablename LIKE 'gps_posicoes_%'
+            `
+        );
+    } catch (err) {
+        console.error('Error listing GPS partition tables', err);
+        return;
+    }
+
+    console.log(`[partitions] found ${result.rows.length} tables matching gps_posicoes_%`);
+
+    const tablesToDrop = result.rows
+        .map((r) => r.tablename)
+        .filter((name) => /^gps_posicoes_\d{8}$/.test(name))
+        .map((name) => {
+            const y = name.slice('gps_posicoes_'.length, 'gps_posicoes_'.length + 4);
+            const m = name.slice('gps_posicoes_'.length + 4, 'gps_posicoes_'.length + 6);
+            const d = name.slice('gps_posicoes_'.length + 6, 'gps_posicoes_'.length + 8);
+            return { name, dateStr: `${y}-${m}-${d}` };
+        })
+        .filter(({ dateStr }) => dateStr < cutoffSpStr)
+        .sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+
+    if (tablesToDrop.length === 0) {
+        console.log(`[partitions] nothing to drop (cutoff=${cutoffSpStr})`);
+        return;
+    }
+
+    console.log(
+        `[partitions] will drop ${tablesToDrop.length} partitions older than ${cutoffSpStr}: ${tablesToDrop
+            .map((t) => `${t.name}(${t.dateStr})`)
+            .join(', ')}`
+    );
+
+    for (const { name, dateStr } of tablesToDrop) {
+        try {
+            console.log(`[partitions] dropping ${name} (date=${dateStr})`);
+            await dbPool.query(`DROP TABLE IF EXISTS public.${name};`);
+        } catch (err) {
+            console.error('Error dropping old GPS partition', name, dateStr, { cutoffSpStr, todaySpStr }, err);
+        }
+    }
+
+    console.log(`[partitions] cleanup done dropped=${tablesToDrop.length}`);
+}
+
 async function createPartitionForDate(dateStr) {
     const tableSuffix = dateStr.replace(/-/g, '');
     const tableName = `gps_posicoes_${tableSuffix}`;
@@ -105,6 +167,8 @@ async function ensureFuturePartitions() {
         const dateStr = formatDateYYYYMMDD(targetDate);
         await createPartitionForDate(dateStr);
     }
+
+    await cleanupOldPartitions(7);
 }
 
 module.exports = {
