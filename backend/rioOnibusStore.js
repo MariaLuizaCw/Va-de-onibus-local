@@ -1,5 +1,22 @@
 const rio_onibus = Object.create(null);
 
+function replaceRioOnibusSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return;
+
+    for (const key of Object.keys(rio_onibus)) {
+        delete rio_onibus[key];
+    }
+
+    for (const linhaKey of Object.keys(snapshot)) {
+        const positions = snapshot[linhaKey];
+        if (!Array.isArray(positions)) continue;
+
+        for (const pos of positions) {
+            addPosition(pos);
+        }
+    }
+}
+
 function ensureBucket(linha, ordem) {
     const linhaKey = String(linha);
     const ordemKey = String(ordem);
@@ -90,6 +107,7 @@ function getLastPosition(linha, ordem) {
 module.exports = {
     addPosition,
     addPositions,
+    replaceRioOnibusSnapshot,
     getRioOnibus,
     getLine,
     getLineLastPositions,

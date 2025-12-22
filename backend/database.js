@@ -14,7 +14,7 @@ const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) ||
 async function enrichRecordsWithSentido(records) {
     if (!Array.isArray(records) || records.length === 0) return records;
 
-    const BATCH_SIZE = Number(process.env.SENTIDO_BATCH_SIZE) || 500;
+    const BATCH_SIZE = Number(process.env.SENTIDO_BATCH_SIZE) || 2000;
     const PARAMS_PER_ROW = 4;
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
@@ -102,7 +102,7 @@ async function enrichRecordsWithSentido(records) {
 
 async function saveRecordsToDb(records) {
     if (!records || records.length === 0) return;
-    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 500;
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
     const PARAMS_PER_ROW = 8;
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
@@ -156,6 +156,39 @@ async function saveRecordsToDb(records) {
         } catch (err) {
             console.error('Error inserting GPS records into database:', err);
         }
+    }
+}
+
+async function loadLatestRioOnibusSnapshot() {
+    const text = `
+        SELECT data
+        FROM public.rio_onibus_snapshots
+        LIMIT 1;
+    `;
+
+    try {
+        const result = await dbPool.query(text);
+        if (!result.rows || result.rows.length === 0) {
+            console.log('[snapshot] No snapshot found in database');
+            return null;
+        }
+        console.log('[snapshot] Loaded snapshot from database');
+        return result.rows[0].data || null;
+    } catch (err) {
+        console.error('[snapshot] Error loading latest rio_onibus snapshot from database:', err);
+        return null;
+    }
+}
+
+async function saveRioOnibusSnapshot(snapshot) {
+    if (!snapshot) return;
+
+    try {
+        await dbPool.query('TRUNCATE public.rio_onibus_snapshots');
+        await dbPool.query('INSERT INTO public.rio_onibus_snapshots (data) VALUES ($1::jsonb)', [snapshot]);
+        console.log('[snapshot] Saved snapshot to database');
+    } catch (err) {
+        console.error('[snapshot] Error inserting rio_onibus snapshot into database:', err);
     }
 }
 
@@ -259,12 +292,15 @@ async function ensureFuturePartitions() {
         await createPartitionForDate(dateStr);
     }
 
-    await cleanupOldPartitions(7);
+    const retentionDays = Number(process.env.PARTITION_RETENTION_DAYS) || 7;
+    await cleanupOldPartitions(retentionDays);
 }
 
 module.exports = {
     dbPool,
     enrichRecordsWithSentido,
     saveRecordsToDb,
+    saveRioOnibusSnapshot,
+    loadLatestRioOnibusSnapshot,
     ensureFuturePartitions,
 };

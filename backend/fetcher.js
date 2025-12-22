@@ -4,7 +4,7 @@ const { API_TIMEZONE, formatDateInTimeZone } = require('./utils');
 const { addPositions } = require('./rioOnibusStore');
 
 async function fetchGPSData(windowInMinutes = 3, options = {}) {
-    const { updateInMemoryStore = true } = options;
+    const { updateInMemoryStore = true, skipEnrich = false } = options;
     const now = new Date();
 
     // overlap window configurável em minutos; default 3
@@ -31,10 +31,12 @@ async function fetchGPSData(windowInMinutes = 3, options = {}) {
         });
 
         const records = response.data;
-        try {
-            await enrichRecordsWithSentido(records);
-        } catch (err) {
-            console.error('[sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
+        if (!skipEnrich) {
+            try {
+                await enrichRecordsWithSentido(records);
+            } catch (err) {
+                console.error('[sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
+            }
         }
         if (updateInMemoryStore) addPositions(records);
         await saveRecordsToDb(records);
