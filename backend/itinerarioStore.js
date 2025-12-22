@@ -54,7 +54,7 @@ function getItinerariosByLinha(linha) {
     return itinerarioByLinha[String(linha)] || [];
 }
 
-function chooseSentidoForPoint(linha, lon, lat) {
+function computeSentidoMetricsForPoint(linha, lon, lat) {
     const candidates = getItinerariosByLinha(linha);
     if (!candidates || candidates.length === 0) return null;
 
@@ -64,12 +64,14 @@ function chooseSentidoForPoint(linha, lon, lat) {
 
     const pt = turf.point([lonN, latN]);
 
+    const distancias = [];
     let best = null;
 
     for (const cand of candidates) {
         try {
             if (!cand.line) continue;
             const distMeters = turf.pointToLineDistance(pt, cand.line, { units: 'meters' });
+            distancias.push({ sentido: cand.sentido, distancia_metros: distMeters });
             if (best == null || distMeters < best.distancia_metros) {
                 best = { sentido: cand.sentido, distancia_metros: distMeters };
             }
@@ -78,16 +80,25 @@ function chooseSentidoForPoint(linha, lon, lat) {
         }
     }
 
+    distancias.sort((a, b) => (a.distancia_metros || 0) - (b.distancia_metros || 0));
     if (!best) return null;
-    if (best.distancia_metros > MAX_SNAP_DISTANCE_METERS) return null;
 
-    return best;
+    return { best, distancias };
+}
+
+function chooseSentidoForPoint(linha, lon, lat) {
+    const metrics = computeSentidoMetricsForPoint(linha, lon, lat);
+    if (!metrics) return null;
+    if (!metrics.best) return null;
+    if (metrics.best.distancia_metros > MAX_SNAP_DISTANCE_METERS) return null;
+    return metrics.best;
 }
 
 module.exports = {
     loadItinerarioIntoMemory,
     isLoaded,
     getItinerariosByLinha,
+    computeSentidoMetricsForPoint,
     chooseSentidoForPoint,
     MAX_SNAP_DISTANCE_METERS,
 };

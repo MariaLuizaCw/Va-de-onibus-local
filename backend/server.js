@@ -4,11 +4,9 @@ const { fetchGPSData } = require('./fetcher');
 const { ensureFuturePartitions } = require('./database');
 const { getRioOnibus, getLineLastPositions, getLastPosition } = require('./rioOnibusStore');
 const { loadItinerarioIntoMemory } = require('./itinerarioStore');
-const { chooseSentidoForPoint } = require('./itinerarioStore');
+const { computeSentidoMetricsForPoint } = require('./itinerarioStore');
 
 const app = express();
-
-const sentidoCache = new Map();
 
 app.use(cors());
 app.use(express.json());
@@ -43,16 +41,12 @@ app.get('/rio_onibus', (req, res) => {
                     result[ordemKey] = null;
                 } else {
                     const cacheKey = `${String(linha)}|${String(ordemKey)}|${Number(pos.datahora)}`;
-                    let sentidoInfo = sentidoCache.get(cacheKey);
-
-                    if (!sentidoInfo) {
-                        sentidoInfo = chooseSentidoForPoint(linha, pos.longitude, pos.latitude);
-                        sentidoCache.set(cacheKey, sentidoInfo);
-                    }
+                    const metrics = computeSentidoMetricsForPoint(linha, pos.longitude, pos.latitude);
+                    const best = metrics && metrics.best ? metrics.best : null;
 
                     result[ordemKey] = {
                         ...pos,
-                        sentido: sentidoInfo ? sentidoInfo.sentido : null
+                        sentido: best ? best.sentido : null
                     };
                 }
 
