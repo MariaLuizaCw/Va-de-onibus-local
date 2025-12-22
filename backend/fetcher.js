@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { saveRecordsToDb, ensureFuturePartitions } = require('./database');
+const { enrichRecordsWithSentido, saveRecordsToDb } = require('./database');
 const { API_TIMEZONE, formatDateInTimeZone } = require('./utils');
 const { addPositions } = require('./rioOnibusStore');
 
@@ -31,6 +31,11 @@ async function fetchGPSData(windowInMinutes = 3, options = {}) {
         });
 
         const records = response.data;
+        try {
+            await enrichRecordsWithSentido(records);
+        } catch (err) {
+            console.error('[sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
+        }
         if (updateInMemoryStore) addPositions(records);
         await saveRecordsToDb(records);
 

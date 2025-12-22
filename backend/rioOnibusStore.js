@@ -31,7 +31,9 @@ function addPosition(record) {
         datahora: Number(record.datahora),
         velocidade: Number(record.velocidade),
         datahoraenvio: Number(record.datahoraenvio),
-        datahoraservidor: Number(record.datahoraservidor)
+        datahoraservidor: Number(record.datahoraservidor),
+        sentido: record.sentido != null ? String(record.sentido) : null,
+        distancia_metros: record.distancia_metros != null ? Number(record.distancia_metros) : null
     };
 
     bucket.push(pos);
@@ -46,7 +48,11 @@ function addPositions(records) {
 }
 
 function getRioOnibus() {
-    return rio_onibus;
+    const result = Object.create(null);
+    for (const linhaKey of Object.keys(rio_onibus)) {
+        result[linhaKey] = getLineLastPositions(linhaKey);
+    }
+    return result;
 }
 
 function getLine(linha) {
@@ -56,11 +62,11 @@ function getLine(linha) {
 
 function getLineLastPositions(linha) {
     const ordens = getLine(linha);
-    const result = Object.create(null);
+    const result = [];
 
     for (const ordemKey of Object.keys(ordens)) {
         const bucket = ordens[ordemKey];
-        result[ordemKey] = Array.isArray(bucket) && bucket.length > 0 ? bucket[0] : null;
+        if (Array.isArray(bucket) && bucket.length > 0) result.push(bucket[0]);
     }
 
     return result;
