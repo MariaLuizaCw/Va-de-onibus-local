@@ -10,7 +10,7 @@ const {
     saveAngraOnibusSnapshot 
 } = require('./snapshots');
 const { ensureFuturePartitions } = require('./partitions');
-const { generateSentidoCoverageReport } = require('./reports');
+const { generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./reports');
 
 module.exports = {
     dbPool,
@@ -25,4 +25,5 @@ module.exports = {
     loadLatestAngraOnibusSnapshot,
     ensureFuturePartitions,
     generateSentidoCoverageReport,
+    generateAngraRouteTypeReport,
 };

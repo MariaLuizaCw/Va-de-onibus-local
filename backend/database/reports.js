@@ -49,15 +49,16 @@ async function generateSentidoCoverageReport() {
             FROM pontos_with_dist
             GROUP BY linha
         )
-        INSERT INTO public.sentido_coverage_report (report_date, linha, total_pontos, pontos_sem_sentido, pct_sem_sentido)
+        INSERT INTO public.sentido_coverage_report (report_date, city, linha, total_pontos, pontos_sem_sentido, pct_sem_sentido)
         SELECT
             $1::date AS report_date,
+            'rio' AS city,
             c.linha,
             c.sample_count AS total_pontos,
             c.sample_count - c.covered_count AS pontos_sem_sentido,
             ROUND(100.0 * (c.sample_count - c.covered_count) / NULLIF(c.sample_count, 0), 2) AS pct_sem_sentido
         FROM coverage c
-        ON CONFLICT (report_date, linha) DO UPDATE SET
+        ON CONFLICT (report_date, city, linha) DO UPDATE SET
             total_pontos = EXCLUDED.total_pontos,
             pontos_sem_sentido = EXCLUDED.pontos_sem_sentido,
             pct_sem_sentido = EXCLUDED.pct_sem_sentido;
@@ -65,15 +66,52 @@ async function generateSentidoCoverageReport() {
 
     try {
         const result = await dbPool.query(query, [reportDate, API_TIMEZONE, MAX_SNAP_DISTANCE_METERS]);
-        console.log(`[coverage] Generated sentido coverage report for ${reportDate}: ${result.rowCount} lines`);
+        console.log(`[coverage][rio] Generated sentido coverage report for ${reportDate}: ${result.rowCount} lines`);
 
         // Cleanup reports older than 1 month
         await dbPool.query(`DELETE FROM public.sentido_coverage_report WHERE report_date < CURRENT_DATE - interval '1 month'`);
     } catch (err) {
-        console.error('[coverage] Error generating sentido coverage report:', err);
+        console.error('[coverage][rio]  Error generating sentido coverage report:', err);
+    }
+}
+
+async function generateAngraRouteTypeReport() {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const reportDate = formatDateYYYYMMDDInTimeZone(yesterday, API_TIMEZONE);
+
+    const query = `
+        WITH day_bounds AS (
+            SELECT
+                ($1::date AT TIME ZONE $2) AS start_ts,
+                (($1::date + interval '1 day') AT TIME ZONE $2) AS end_ts
+        )
+        INSERT INTO public.sentido_coverage_report (report_date, city, linha, total_pontos, pontos_sem_sentido, pct_sem_sentido)
+        SELECT
+            $1::date AS report_date,
+            'angra' AS city,
+            line_number AS linha,
+            COUNT(*) AS total_pontos,
+            COUNT(*) FILTER (WHERE route_type = 'indefinido') AS pontos_sem_sentido,
+            ROUND(100.0 * COUNT(*) FILTER (WHERE route_type = 'indefinido') / NULLIF(COUNT(*), 0), 2) AS pct_sem_sentido
+        FROM public.gps_posicoes_angra, day_bounds
+        WHERE event_date >= day_bounds.start_ts AND event_date < day_bounds.end_ts
+        GROUP BY line_number
+        ON CONFLICT (report_date, city, linha) DO UPDATE SET
+            total_pontos = EXCLUDED.total_pontos,
+            pontos_sem_sentido = EXCLUDED.pontos_sem_sentido,
+            pct_sem_sentido = EXCLUDED.pct_sem_sentido;
+    `;
+
+    try {
+        const result = await dbPool.query(query, [reportDate, API_TIMEZONE]);
+        console.log(`[coverage][angra] Generated undefined route_type report for ${reportDate}: ${result.rowCount} lines`);
+    } catch (err) {
+        console.error('[coverage][angra] Error generating Angra route_type report:', err);
     }
 }
 
 module.exports = {
     generateSentidoCoverageReport,
+    generateAngraRouteTypeReport,
 };

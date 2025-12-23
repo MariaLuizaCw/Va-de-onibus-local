@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { fetchRioGPSData } = require('./fetchers/rioFetcher');
 const { fetchAngraGPSData, fetchCircularLines } = require('./fetchers/angraFetcher');
-const { ensureFuturePartitions, saveRioOnibusSnapshot, loadLatestRioOnibusSnapshot, saveAngraOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSentidoCoverageReport } = require('./database/index');
+const { ensureFuturePartitions, saveRioOnibusSnapshot, loadLatestRioOnibusSnapshot, saveAngraOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./database/index');
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
 const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
 
@@ -52,9 +52,14 @@ function setupPartitionChecks() {
 function setupCoverageReporting() {
     console.log('[server] Generating initial sentido coverage report');
     generateSentidoCoverageReport();
+    generateAngraRouteTypeReport();
     setInterval(() => {
         console.log('[server] Generating scheduled sentido coverage report');
         generateSentidoCoverageReport();
+    }, COVERAGE_REPORT_INTERVAL_MS);
+    setInterval(() => {
+        console.log('[server] Generating scheduled angra route_type report');
+        generateAngraRouteTypeReport();
     }, COVERAGE_REPORT_INTERVAL_MS);
 }
 

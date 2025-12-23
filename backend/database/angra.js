@@ -4,7 +4,7 @@ const { API_TIMEZONE } = require('../utils');
 async function saveAngraRecordsToDb(records) {
     if (!records || records.length === 0) return;
     const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
-    const PARAMS_PER_ROW = 26;
+    const PARAMS_PER_ROW = 27;
     const RETENTION_DAYS = Number(process.env.PARTITION_RETENTION_DAYS) || 7;
 
     // Filtra registros que estão dentro do período de retenção (partições existentes)
@@ -58,7 +58,8 @@ async function saveAngraRecordsToDb(records) {
                 record.IsRouteEndPoint,
                 record.IsGarage,
                 record.LicensePlate,
-                record.ClientBusIntegrationCode
+                record.ClientBusIntegrationCode,
+                record.RouteType
             );
 
             const baseIndex = index * PARAMS_PER_ROW;
@@ -96,7 +97,8 @@ async function saveAngraRecordsToDb(records) {
                 is_route_end_point,
                 is_garage,
                 license_plate,
-                client_bus_integration_code
+                client_bus_integration_code,
+                route_type
             ) VALUES
                 ${placeholders.join(',\n')}
             ON CONFLICT ON CONSTRAINT gps_posicoes_angra_unique_ponto DO NOTHING;
