@@ -1,0 +1,61 @@
+const { dbPool } = require('./pool');
+
+async function loadOnibusSnapshot(city = 'rio') {
+    const text = `
+        SELECT data
+        FROM public.onibus_snapshots
+        WHERE city = $1
+        LIMIT 1;
+    `;
+
+    try {
+        const result = await dbPool.query(text, [city]);
+        if (!result.rows || result.rows.length === 0) {
+            console.log(`[snapshot][${city}] No snapshot found in database`);
+            return null;
+        }
+        console.log(`[snapshot][${city}] Loaded snapshot from database`);
+        return result.rows[0].data || null;
+    } catch (err) {
+        console.error(`[snapshot][${city}] Error loading snapshot from database:`, err);
+        return null;
+    }
+}
+
+async function saveOnibusSnapshot(snapshot, city = 'rio') {
+    if (!snapshot) return;
+
+    try {
+        await dbPool.query('DELETE FROM public.onibus_snapshots WHERE city = $1', [city]);
+        await dbPool.query('INSERT INTO public.onibus_snapshots (city, data) VALUES ($1, $2::jsonb)', [city, snapshot]);
+        console.log(`[snapshot][${city}] Saved snapshot to database`);
+    } catch (err) {
+        console.error(`[snapshot][${city}] Error inserting snapshot into database:`, err);
+    }
+}
+
+// Aliases para compatibilidade
+async function loadLatestRioOnibusSnapshot() {
+    return loadOnibusSnapshot('rio');
+}
+
+async function saveRioOnibusSnapshot(snapshot) {
+    return saveOnibusSnapshot(snapshot, 'rio');
+}
+
+async function loadLatestAngraOnibusSnapshot() {
+    return loadOnibusSnapshot('angra');
+}
+
+async function saveAngraOnibusSnapshot(snapshot) {
+    return saveOnibusSnapshot(snapshot, 'angra');
+}
+
+module.exports = {
+    loadOnibusSnapshot,
+    saveOnibusSnapshot,
+    loadLatestRioOnibusSnapshot,
+    saveRioOnibusSnapshot,
+    loadLatestAngraOnibusSnapshot,
+    saveAngraOnibusSnapshot,
+};

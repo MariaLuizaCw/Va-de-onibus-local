@@ -1,9 +1,9 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRecordsToDb } = require('./database');
-const { API_TIMEZONE, formatDateInTimeZone } = require('./utils');
-const { addPositions } = require('./rioOnibusStore');
+const { enrichRecordsWithSentido, saveRioRecordsToDb } = require('../database/index');
+const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
+const { addPositions } = require('../stores/rioOnibusStore');
 
-async function fetchGPSData(windowInMinutes = 3, options = {}) {
+async function fetchRioGPSData(windowInMinutes = 3, options = {}) {
     const { updateInMemoryStore = true, skipEnrich = false } = options;
     const now = new Date();
 
@@ -13,14 +13,14 @@ async function fetchGPSData(windowInMinutes = 3, options = {}) {
     const dataInicial = formatDateInTimeZone(startWindow, API_TIMEZONE);
     const dataFinal = formatDateInTimeZone(now, API_TIMEZONE);
 
-    const startMsg = `Polling GPS data: ${dataInicial} to ${dataFinal}`;
+    const startMsg = `[Rio] Polling GPS data: ${dataInicial} to ${dataFinal}`;
     console.log(startMsg);
 
     // Log full URL used for fetchGPSData
     const urlBase = 'https://dados.mobilidade.rio/gps/sppo';
     const queryString = `?dataInicial=${encodeURIComponent(dataInicial)}&dataFinal=${encodeURIComponent(dataFinal)}`;
     const fullRequestUrl = `${urlBase}${queryString}`;
-    console.log(`fetchGPSData URL: ${fullRequestUrl}`);
+    console.log(`[Rio] fetchGPSData URL: ${fullRequestUrl}`);
 
     try {
         const response = await axios.get(urlBase, {
@@ -35,20 +35,20 @@ async function fetchGPSData(windowInMinutes = 3, options = {}) {
             try {
                 await enrichRecordsWithSentido(records);
             } catch (err) {
-                console.error('[sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
+                console.error('[Rio][sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
             }
         }
         if (updateInMemoryStore) addPositions(records);
-        await saveRecordsToDb(records);
+        await saveRioRecordsToDb(records);
 
-        const successMsg = `Success! Fetched ${records.length} records.`;
+        const successMsg = `[Rio] Success! Fetched ${records.length} records.`;
         console.log(successMsg);
     } catch (error) {
-        const errorMsg = `Error fetching data: ${error.message}`;
+        const errorMsg = `[Rio] Error fetching data: ${error.message}`;
         console.error(errorMsg);
     }
 }
 
 module.exports = {
-    fetchGPSData,
+    fetchRioGPSData,
 };
