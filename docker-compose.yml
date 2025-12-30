@@ -49,6 +49,12 @@ services:
       SENTIDO_BATCH_SIZE: ${SENTIDO_BATCH_SIZE}
       DB_BATCH_SIZE: ${DB_BATCH_SIZE}
       COVERAGE_REPORT_INTERVAL_MS: ${COVERAGE_REPORT_INTERVAL_MS}
+      # api
+      API_BASE_PATH: ${API_BASE_PATH}
+      AUTH_USERNAME: ${AUTH_USERNAME}
+      AUTH_PASSWORD: ${AUTH_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
     
     ports:
       - "${BACKEND_PORT}:3001"
@@ -59,7 +65,7 @@ services:
       dockerfile: Dockerfile
     container_name: vadeonibus-frontend
     environment:
-      VITE_BACKEND_URL: http://localhost:3001
+      PUBLIC_BACKEND_URL: ${BACKEND_URL}
     ports:
       - "5173:5173"
 
