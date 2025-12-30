@@ -8,6 +8,9 @@ RUN npm install
 
 COPY . .
 
+# Ensure SvelteKit sync runs after all sources are present.
+RUN npm run prepare
+
 # SvelteKit dev server default port
 EXPOSE 5173
 
