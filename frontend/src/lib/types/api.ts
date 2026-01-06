@@ -25,3 +25,24 @@ export type CityOption = {
     id: string;
     label: string;
 };
+
+export type LineStats = {
+    linha: string;
+    lastUpdate: string | null;
+    isActive: boolean;
+    totalOrders: number;
+    activeOrders: number;
+};
+
+export type CityStats = {
+    totalLines: number;
+    activeLines: number;
+    totalOrders: number;
+    activeOrders: number;
+    lines: LineStats[];
+};
+
+export type StatsResponse = {
+    rio: CityStats;
+    angra: CityStats;
+};

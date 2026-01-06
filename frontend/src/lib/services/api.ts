@@ -1,6 +1,6 @@
 // Purpose: unifica chamadas HTTP ao backend, incluindo login e consulta de rotas.
 import { PUBLIC_BACKEND_URL } from '$env/static/public';
-import type { ApiRecord, LoginCredentials, RawResponse, AuthResponse, CityOption } from '$lib/types/api';
+import type { ApiRecord, LoginCredentials, RawResponse, AuthResponse, CityOption, StatsResponse } from '$lib/types/api';
 
 const BACKEND_BASE_URL = PUBLIC_BACKEND_URL;
 export const TOKEN_STORAGE_KEY = 'vadeonibus_jwt';
@@ -75,6 +75,26 @@ export async function fetchRouteData(city: string, linha: string, token: string)
 
     const payload: RawResponse = await response.json();
     return normalizeRecords(payload, linha);
+}
+
+export async function fetchStats(token: string): Promise<StatsResponse> {
+    const response = await fetch(`${BACKEND_BASE_URL}/stats/lines`, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    if (response.status === 401) {
+        throw new UnauthorizedError();
+    }
+
+    if (!response.ok) {
+        const message = await buildErrorMessage(response);
+        throw new Error(message);
+    }
+
+    return response.json();
 }
 
 export { cities };

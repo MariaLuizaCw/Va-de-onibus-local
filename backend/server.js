@@ -6,6 +6,7 @@ const { fetchAngraGPSData, fetchCircularLines } = require('./fetchers/angraFetch
 const { ensureFuturePartitions, saveRioOnibusSnapshot, loadLatestRioOnibusSnapshot, saveAngraOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./database/index');
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
 const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
+const { resolveRioTimestamp, resolveAngraTimestamp, summarizeLines } = require('./utils/stats');
 
 const app = express();
 
@@ -13,6 +14,9 @@ const AUTH_USERNAME = process.env.AUTH_USERNAME;
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MULTI_ORDER_LIMIT = Number(process.env.MULTI_ORDER_LIMIT) || 5;
 
 if (!AUTH_USERNAME || !AUTH_PASSWORD) {
     console.error('[auth] AUTH_USERNAME and AUTH_PASSWORD must be set.');
@@ -80,6 +84,15 @@ router.post('/auth/login', (req, res) => {
 });
 
 router.use(authenticateToken);
+
+router.get('/stats/lines', (req, res) => {
+    const rioStats = summarizeLines(getRioOnibus(), resolveRioTimestamp);
+    const angraStats = summarizeLines(getAngraOnibus(), resolveAngraTimestamp);
+    return res.json({
+        rio: rioStats,
+        angra: angraStats
+    });
+});
 
 // Rio endpoints
 router.post('/rio_onibus', (req, res) => {

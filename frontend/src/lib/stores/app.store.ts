@@ -1,9 +1,10 @@
 // Purpose: centralizar estado e ações da aplicação (autenticação + busca de rotas).
 import { get, writable } from 'svelte/store';
-import type { ApiRecord, LoginCredentials } from '$lib/types/api';
+import type { ApiRecord, LoginCredentials, CityStats, LineStats } from '$lib/types/api';
 import {
     login as loginService,
     fetchRouteData,
+    fetchStats,
     UnauthorizedError,
     TOKEN_STORAGE_KEY,
     cities as cityOptions
@@ -14,6 +15,7 @@ const canUseBrowser = typeof window !== 'undefined';
 type AppState = {
     city: string;
     linha: string;
+    lastSearchedLine: string;
     tableData: ApiRecord[];
     loading: boolean;
     statusMessage: string;
@@ -23,6 +25,9 @@ type AppState = {
     loginLoading: boolean;
     loginError: string | null;
     preferredSortFields: string[];
+    stats: { rio: CityStats; angra: CityStats } | null;
+    statsLoading: boolean;
+    selectedLineStats: LineStats | null;
 };
 
 const initialToken = canUseBrowser ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
@@ -30,6 +35,7 @@ const initialToken = canUseBrowser ? localStorage.getItem(TOKEN_STORAGE_KEY) : n
 const initialState: AppState = {
     city: 'rio',
     linha: '',
+    lastSearchedLine: '',
     tableData: [],
     loading: false,
     statusMessage: 'Selecione a cidade e informe a linha para ver os registros.',
@@ -38,7 +44,10 @@ const initialState: AppState = {
     authToken: initialToken,
     loginLoading: false,
     loginError: null,
-    preferredSortFields: ['datahora']
+    preferredSortFields: ['datahora'],
+    stats: null,
+    statsLoading: false,
+    selectedLineStats: null
 };
 
 function createAppStore() {
@@ -88,6 +97,7 @@ function createAppStore() {
             ...s,
             authToken: null,
             linha: '',
+            lastSearchedLine: '',
             tableData: [],
             lastFetched: null,
             statusMessage: message ?? 'Sessão encerrada.',
@@ -128,12 +138,20 @@ function createAppStore() {
         }));
 
         try {
-            const records = await fetchRouteData(state.city, trimmedLine, state.authToken);
+            const [records, stats] = await Promise.all([
+                fetchRouteData(state.city, trimmedLine, state.authToken),
+                fetchStats(state.authToken)
+            ]);
             const timestamp = new Date().toLocaleTimeString();
+            const cityStats = state.city === 'rio' ? stats.rio : stats.angra;
+            const lineStats = cityStats.lines.find((l) => l.linha === trimmedLine) || null;
             store.update((s) => ({
                 ...s,
                 tableData: records,
                 lastFetched: timestamp,
+                lastSearchedLine: trimmedLine,
+                stats,
+                selectedLineStats: lineStats,
                 statusMessage:
                     records.length === 0
                         ? 'Nenhum registro encontrado para essa linha.'
@@ -157,13 +175,44 @@ function createAppStore() {
         }
     }
 
+    async function loadStats() {
+        const state = get(store);
+        if (!state.authToken) return;
+
+        store.update((s) => ({ ...s, statsLoading: true }));
+        try {
+            const stats = await fetchStats(state.authToken);
+            store.update((s) => ({ ...s, stats, statsLoading: false }));
+        } catch (error) {
+            if (error instanceof UnauthorizedError) {
+                logout(error.message);
+                return;
+            }
+            store.update((s) => ({ ...s, statsLoading: false }));
+        }
+    }
+
+    function selectLineStats(linha: string) {
+        const state = get(store);
+        if (!state.stats) {
+            store.update((s) => ({ ...s, selectedLineStats: null }));
+            return;
+        }
+
+        const cityStats = state.city === 'rio' ? state.stats.rio : state.stats.angra;
+        const lineStats = cityStats.lines.find((l) => l.linha === linha) || null;
+        store.update((s) => ({ ...s, selectedLineStats: lineStats }));
+    }
+
     return {
         subscribe: store.subscribe,
         setCity,
         setLine,
         login,
         logout,
-        fetchRoute
+        fetchRoute,
+        loadStats,
+        selectLineStats
     };
 }
 

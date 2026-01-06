@@ -1,13 +1,22 @@
 <!-- Purpose: apresenta a tela principal consumindo o store unificado do app. -->
 <script lang="ts">
+    
     import RouteFilter from '$lib/components/RouteFilter.svelte';
     import ApiTable from '$lib/components/ApiTable.svelte';
     import LoginScreen from '$lib/components/LoginScreen.svelte';
     import LogoutButton from '$lib/components/LogoutButton.svelte';
+    import StatsPanel from '$lib/components/StatsPanel.svelte';
     import { appStore, cities } from '$lib/stores/app.store';
 
     const store = appStore;
-    const { setCity, setLine, login, logout, fetchRoute } = store;
+    const { setCity, setLine, login, logout, fetchRoute, loadStats } = store;
+
+    $: currentCityStats = $store.stats ? ($store.city === 'rio' ? $store.stats.rio : $store.stats.angra) : null;
+    $: cityLabel = $store.city === 'rio' ? 'Rio de Janeiro' : 'Angra dos Reis';
+
+    $: if ($store.authToken && !$store.stats && !$store.statsLoading) {
+        loadStats();
+    }
 </script>
 
 <svelte:head>
@@ -21,8 +30,10 @@
         <div class="hero-logout">
             <LogoutButton on:logout={() => logout()} />
         </div>
+
+        <StatsPanel stats={currentCityStats} loading={$store.statsLoading} cityLabel={cityLabel} />
+
         <section class="hero">
-          
             <div>
                 <p class="eyebrow">Dashboard API</p>
                 <h1>Explore rotas do backend em tempo real</h1>
@@ -46,12 +57,40 @@
 
         <section class="table-section">
             <header>
-                <div>
-                    <span class="subtitle">Resposta JSON</span>
-                    <h2>{$store.city === 'rio' ? 'Rio de Janeiro' : 'Angra dos Reis'} · Linha {$store.linha || 'n/a'}</h2>
+                <div class="table-header">
+                    <div>
+                        <span class="subtitle">Resposta JSON</span>
+                        <h2>{cityLabel} · Linha {$store.lastSearchedLine || 'n/a'}</h2>
+                    </div>
+
+                    {#if $store.lastFetched}
+                        <span class="timestamp">Última atualização: {$store.lastFetched}</span>
+                    {/if}
                 </div>
-                {#if $store.lastFetched}
-                    <span class="timestamp">Última atualização: {$store.lastFetched}</span>
+
+                {#if $store.selectedLineStats}
+                    <div class="line-stats-inline">
+                        <div class="stat">
+                            <span class="label">Última atualização</span>
+                            <span class="value">
+                                {#if $store.selectedLineStats.lastUpdate}
+                                    {new Date($store.selectedLineStats.lastUpdate).toLocaleString('pt-BR')}
+                                {:else}
+                                    —
+                                {/if}
+                            </span>
+                        </div>
+                        <div class="stat">
+                            <span class="label">Status</span>
+                            <span class="value status" class:active={$store.selectedLineStats.isActive} class:inactive={!$store.selectedLineStats.isActive}>
+                                {$store.selectedLineStats.isActive ? 'Ativa' : 'Inativa'}
+                            </span>
+                        </div>
+                        <div class="stat">
+                            <span class="label">Ordens ativas</span>
+                            <span class="value">{$store.selectedLineStats.activeOrders} / {$store.selectedLineStats.totalOrders}</span>
+                        </div>
+                    </div>
                 {/if}
             </header>
 
@@ -72,18 +111,18 @@
     }
 
     .page {
-        padding: 3rem clamp(1.5rem, 3vw, 3.5rem) 4rem;
-        max-width: 1100px;
+        padding: 3rem clamp(1rem, 3vw, 2.5rem) 3.5rem;
+        max-width: 1400px;
         margin: 0 auto;
         display: flex;
         flex-direction: column;
-        gap: 2rem;
+        gap: 1.5rem;
     }
 
     .hero-logout {
         position: absolute;
-        top: 2rem;
-        right: 2rem;
+        top: 1.5rem;
+        right: 1.5rem;
         z-index: 10;
     }
     .hero {
@@ -132,20 +171,67 @@
     }
 
     .table-section {
-        background: rgba(15, 23, 42, 0.8);
-        border-radius: 1.5rem;
-        border: 1px solid rgba(148, 163, 184, 0.15);
-        padding: 2rem;
-        box-shadow: 0 25px 40px rgba(2, 6, 23, 0.7);
+        background: rgba(15, 23, 42, 0.85);
+        border-radius: 1.25rem;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        padding: 1.5rem;
+        box-shadow: 0 20px 35px rgba(2, 6, 23, 0.7);
     }
 
     .table-section header {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .table-header {
         display: flex;
         justify-content: space-between;
         align-items: baseline;
         gap: 1rem;
         flex-wrap: wrap;
-        margin-bottom: 1.5rem;
+    }
+
+    .line-stats-inline {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+        background: rgba(30, 41, 59, 0.5);
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        border-radius: 0.9rem;
+        padding: 1rem;
+    }
+
+    .line-stats-inline .stat {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        min-width: 0;
+    }
+
+    .line-stats-inline .label {
+        font-size: 0.75rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgba(226, 232, 240, 0.65);
+    }
+
+    .line-stats-inline .value {
+        font-size: 0.95rem;
+        color: #f8fafc;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .line-stats-inline .status.active {
+        color: #34d399;
+    }
+
+    .line-stats-inline .status.inactive {
+        color: #f87171;
     }
 
     h2 {
@@ -168,6 +254,10 @@
 
     @media (max-width: 768px) {
         .hero {
+            grid-template-columns: 1fr;
+        }
+
+        .line-stats-inline {
             grid-template-columns: 1fr;
         }
     }
