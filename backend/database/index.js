@@ -1,6 +1,6 @@
 const { dbPool } = require('./pool');
-const { enrichRecordsWithSentido, saveRioRecordsToDb } = require('./rio');
-const { saveAngraRecordsToDb } = require('./angra');
+const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido } = require('./rio');
+const { saveAngraRecordsToDb, enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('./angra');
 const { 
     loadOnibusSnapshot, 
     saveOnibusSnapshot, 
@@ -16,7 +16,10 @@ module.exports = {
     dbPool,
     enrichRecordsWithSentido,
     saveRioRecordsToDb,
+    saveRioToGpsSentido,
     saveAngraRecordsToDb,
+    enrichAngraRecordsWithSentido,
+    saveAngraToGpsSentido,
     saveOnibusSnapshot,
     loadOnibusSnapshot,
     saveRioOnibusSnapshot,

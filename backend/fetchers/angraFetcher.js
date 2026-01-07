@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { saveAngraRecordsToDb } = require('../database/index');
+const { saveAngraRecordsToDb, enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('../database/index');
 const { addPositions } = require('../stores/angraOnibusStore');
 
 const SSX_BASE_URL = 'https://integration.systemsatx.com.br';
@@ -151,11 +151,23 @@ async function fetchAngraGPSData(options = {}) {
             RouteType: getRouteType(record),
         }));
 
+        // Enriquecer com dados da tabela itinerario
+        try {
+            await enrichAngraRecordsWithSentido(enhancedRecords);
+        } catch (err) {
+            console.error('[Angra][sentido] enrichAngraRecordsWithSentido failed; continuing without sentido', err.message);
+        }
+
         if (updateInMemoryStore) {
             addPositions(enhancedRecords);
         }
 
         await saveAngraRecordsToDb(enhancedRecords);
+
+        // Inserção assíncrona na tabela gps_sentido (não bloqueia o fluxo principal)
+        saveAngraToGpsSentido(enhancedRecords).catch(err => {
+            console.error('[Angra][gps_sentido] Async insert failed:', err.message);
+        });
 
         console.log(`[Angra] Success! Fetched ${records.length} records.`);
     } catch (error) {

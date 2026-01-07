@@ -1,5 +1,7 @@
 const { dbPool } = require('./pool');
+const { formatDateInTimeZone } = require('../utils');
 
+const retention_days = Number(process.env.PARTITION_RETENTION_DAYS) || 7;
 const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
 
 async function enrichRecordsWithSentido(records) {
@@ -43,11 +45,15 @@ async function enrichRecordsWithSentido(records) {
                 pts.linha,
                 pts.ordem,
                 best.sentido,
-                best.dist_m
+                best.dist_m,
+                best.itinerario_id,
+                best.route_name
             FROM pts
             LEFT JOIN LATERAL (
                 SELECT
                     i.sentido,
+                    i.id AS itinerario_id,
+                    i.route_name,
                     ST_Distance(
                         i.the_geom::geography,
                         ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326)::geography
@@ -85,6 +91,8 @@ async function enrichRecordsWithSentido(records) {
             if (!row) continue;
             record.sentido = row.sentido != null ? String(row.sentido) : null;
             record.distancia_metros = row.dist_m != null ? Number(row.dist_m) : null;
+            record.sentido_itinerario_id = row.itinerario_id != null ? Number(row.itinerario_id) : null;
+            record.route_name = row.route_name != null ? String(row.route_name) : null;
         }
     }
 
@@ -150,7 +158,102 @@ async function saveRioRecordsToDb(records) {
     }
 }
 
+async function saveRioToGpsSentido(records) {
+    if (!records || records.length === 0) return;
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
+    const PARAMS_PER_ROW = 10;
+
+    const now = new Date();
+    const minDate = new Date(now.getTime() - retention_days * 24 * 60 * 60 * 1000);
+
+    const filteredRecords = records.filter((record) => {
+        const datahoraMs = Number(record.datahora);
+        if (!Number.isFinite(datahoraMs)) return false;
+        const dt = new Date(datahoraMs);
+        if (isNaN(dt.getTime())) return false;
+        return dt >= minDate && dt <= now;
+    });
+
+    const skippedCount = records.length - filteredRecords.length;
+    if (filteredRecords.length === 0) {
+        console.log(
+            `[Rio][gps_sentido] All ${records.length} records filtered out (outside ${retention_days} day window: ${formatDateInTimeZone(minDate)} to ${formatDateInTimeZone(now)})`
+        );
+        return;
+    }
+
+    if (skippedCount > 0) {
+        console.log(
+            `[Rio][gps_sentido] Filtered ${skippedCount} records outside ${retention_days} day window: ${formatDateInTimeZone(minDate)} to ${formatDateInTimeZone(now)}`
+        );
+    }
+
+    for (let i = 0; i < filteredRecords.length; i += BATCH_SIZE) {
+        const batch = filteredRecords.slice(i, i + BATCH_SIZE);
+
+        const values = [];
+        const placeholders = [];
+
+        batch.forEach((record, index) => {
+            const lat = typeof record.latitude === 'string'
+                ? Number(record.latitude.replace(',', '.'))
+                : Number(record.latitude);
+            const lon = typeof record.longitude === 'string'
+                ? Number(record.longitude.replace(',', '.'))
+                : Number(record.longitude);
+
+            // Converter datahora (ms) para timestamp
+            const datahoraMs = Number(record.datahora);
+            const datahoraTimestamp = Number.isFinite(datahoraMs)
+                ? formatDateInTimeZone(new Date(datahoraMs))
+                : null;
+
+            values.push(
+                record.ordem,
+                datahoraTimestamp,
+                record.linha,
+                lat,
+                lon,
+                Number(record.velocidade),
+                record.sentido || null,
+                record.sentido_itinerario_id || null,
+                record.route_name || null,
+                'PMRJ'
+            );
+
+            const baseIndex = index * PARAMS_PER_ROW;
+            placeholders.push(
+                `($${baseIndex + 1}, $${baseIndex + 2}::timestamp, $${baseIndex + 3}, $${baseIndex + 4}, $${baseIndex + 5}, $${baseIndex + 6}, $${baseIndex + 7}, $${baseIndex + 8}, $${baseIndex + 9}, $${baseIndex + 10})`
+            );
+        });
+
+        const text = `
+            INSERT INTO gps_sentido (
+                ordem,
+                datahora,
+                linha,
+                latitude,
+                longitude,
+                velocidade,
+                sentido,
+                sentido_itinerario_id,
+                route_name,
+                token
+            ) VALUES
+                ${placeholders.join(',\n')}
+            ON CONFLICT (ordem, datahora) DO NOTHING;
+        `;
+
+        try {
+            await dbPool.query(text, values);
+        } catch (err) {
+            console.error('[Rio][gps_sentido] Error inserting records:', err.message);
+        }
+    }
+}
+
 module.exports = {
     enrichRecordsWithSentido,
     saveRioRecordsToDb,
+    saveRioToGpsSentido,
 };

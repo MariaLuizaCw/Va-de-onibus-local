@@ -1,5 +1,12 @@
 const turf = require('@turf/turf');
-const { dbPool } = require('./database');
+let dbPool = null;
+
+function getDbPool() {
+    if (!dbPool) {
+        dbPool = require('./database').dbPool;
+    }
+    return dbPool;
+}
 
 const itinerarioByLinha = Object.create(null);
 let loaded = false;
@@ -7,39 +14,53 @@ let loaded = false;
 const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
 
 async function loadItinerarioIntoMemory() {
+    console.log('[itinerario] Starting load...');
+    for (const key of Object.keys(itinerarioByLinha)) {
+        delete itinerarioByLinha[key];
+    }
+
     const text = `
         SELECT
             numero_linha,
             sentido,
+            id AS itinerario_id,
+            route_name,
             ST_AsGeoJSON(the_geom)::json AS geom
         FROM public.itinerario
         WHERE habilitado = true
     `;
 
-    const result = await dbPool.query(text);
+    let result;
+    try {
+        result = await getDbPool().query(text);
+        console.log(`[itinerario] Query returned ${result.rows.length} rows`);
+    } catch (err) {
+        console.error('[itinerario] Query error:', err);
+        throw err;
+    }
 
     for (const row of result.rows) {
         const linha = String(row.numero_linha);
         const sentido = String(row.sentido);
+        const itinerario_id = row.itinerario_id;
+        const route_name = row.route_name;
         const geom = row.geom;
 
-        if (!geom) continue;
-
-        let line;
-        try {
-            if (geom.type === 'LineString') {
-                line = turf.lineString(geom.coordinates);
-            } else if (geom.type === 'MultiLineString') {
-                line = turf.multiLineString(geom.coordinates);
-            } else {
-                continue;
+        let line = null;
+        if (geom) {
+            try {
+                if (geom.type === 'LineString') {
+                    line = turf.lineString(geom.coordinates);
+                } else if (geom.type === 'MultiLineString') {
+                    line = turf.multiLineString(geom.coordinates);
+                }
+            } catch (err) {
+                line = null;
             }
-        } catch (err) {
-            continue;
         }
 
         if (!itinerarioByLinha[linha]) itinerarioByLinha[linha] = [];
-        itinerarioByLinha[linha].push({ sentido, line });
+        itinerarioByLinha[linha].push({ sentido, itinerario_id, route_name, line });
     }
 
     loaded = true;

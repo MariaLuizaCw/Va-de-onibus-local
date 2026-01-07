@@ -7,6 +7,7 @@ const { ensureFuturePartitions, saveRioOnibusSnapshot, loadLatestRioOnibusSnapsh
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
 const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
 const { resolveRioTimestamp, resolveAngraTimestamp, summarizeLines } = require('./utils/stats');
+const { loadItinerarioIntoMemory } = require('./itinerarioStore');
 
 const app = express();
 
@@ -132,6 +133,21 @@ if (API_BASE_PATH) {
 const PARTITION_CHECK_INTERVAL_MS = Number(process.env.PARTITION_CHECK_INTERVAL_MS) || 86400000;
 const COVERAGE_REPORT_INTERVAL_MS = Number(process.env.COVERAGE_REPORT_INTERVAL_MS) || 86400000;
 const SNAPSHOT_INTERVAL_MS = Number(process.env.SNAPSHOT_INTERVAL_MS) || 900000;
+const ITINERARIO_REFRESH_INTERVAL_MS = Number(process.env.ITINERARIO_REFRESH_INTERVAL_MS) || 6 * 60 * 60 * 1000;
+
+async function setupItinerarioCache() {
+    console.log('[itinerario] Loading itinerario cache');
+    try {
+        await loadItinerarioIntoMemory();
+    } catch (err) {
+        console.error('[itinerario] failed to load', err);
+        throw err;
+    }
+    setInterval(() => {
+        console.log('[itinerario] Refreshing itinerario cache');
+        loadItinerarioIntoMemory().catch(err => console.error('[itinerario] failed to refresh', err));
+    }, ITINERARIO_REFRESH_INTERVAL_MS);
+}
 
 function setupPartitionChecks() {
     console.log(`[server] Running partition check (interval ${PARTITION_CHECK_INTERVAL_MS} ms)`);
@@ -212,11 +228,16 @@ async function setupAngraPolling() {
     }, ANGRA_CIRCULAR_LINES_POLL_MS);
 }
 
-setupPartitionChecks();
-setupCoverageReporting();
-setupSnapshots();
-setupRioPolling();
-setupAngraPolling().catch(err => console.error('[Angra] Failed to bootstrap polling', err));
+async function bootstrap() {
+    setupPartitionChecks();
+    setupCoverageReporting();
+    setupSnapshots();
+    await setupItinerarioCache();
+    setupRioPolling();
+    await setupAngraPolling();
+}
+
+bootstrap().catch(err => console.error('[server] bootstrap failed', err));
 
 app.listen(process.env.BACKEND_PORT || 3001, () => {
     console.log('GPS Backend server running');

@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioRecordsToDb } = require('../database/index');
+const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido } = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -40,6 +40,11 @@ async function fetchRioGPSData(windowInMinutes = 3, options = {}) {
         }
         if (updateInMemoryStore) addPositions(records);
         await saveRioRecordsToDb(records);
+
+        // Inserção assíncrona na tabela gps_sentido (não bloqueia o fluxo principal)
+        saveRioToGpsSentido(records).catch(err => {
+            console.error('[Rio][gps_sentido] Async insert failed:', err.message);
+        });
 
         const successMsg = `[Rio] Success! Fetched ${records.length} records.`;
         console.log(successMsg);

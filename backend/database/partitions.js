@@ -68,6 +68,7 @@ async function cleanupOldPartitionsForTable(tablePrefix, retentionDays = 7) {
 async function cleanupOldPartitions(retentionDays = 7) {
     await cleanupOldPartitionsForTable('gps_posicoes_rio', retentionDays);
     await cleanupOldPartitionsForTable('gps_posicoes_angra', retentionDays);
+    await cleanupOldPartitionsForTable('gps_sentido', retentionDays);
 }
 
 // partitionType: 'bigint_ms' (Rio - milissegundos) ou 'timestamp' (Angra)
@@ -113,6 +114,7 @@ async function ensureFuturePartitions() {
         const dateStr = formatDateYYYYMMDDInTimeZone(targetDate, API_TIMEZONE);
         await createPartitionForDate('gps_posicoes_rio', dateStr, 'bigint_ms');
         await createPartitionForDate('gps_posicoes_angra', dateStr, 'timestamp');
+        await createPartitionForDate('gps_sentido', dateStr, 'timestamp');
     }
 
     const retentionDays = Number(process.env.PARTITION_RETENTION_DAYS) || 7;

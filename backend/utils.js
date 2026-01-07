@@ -1,5 +1,6 @@
 const API_TIMEZONE = process.env.API_TIMEZONE || 'America/Sao_Paulo';
 
+
 // Helper: format date for a specific timezone (e.g. America/Sao_Paulo)
 function formatDateInTimeZone(date, timeZone = API_TIMEZONE) {
     const formatter = new Intl.DateTimeFormat('en-CA', {
