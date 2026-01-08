@@ -14,7 +14,6 @@ let loaded = false;
 const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
 
 async function loadItinerarioIntoMemory() {
-    console.log('[itinerario] Starting load...');
     for (const key of Object.keys(itinerarioByLinha)) {
         delete itinerarioByLinha[key];
     }
@@ -22,7 +21,6 @@ async function loadItinerarioIntoMemory() {
     let result;
     try {
         result = await getDbPool().query('SELECT * FROM fn_get_itinerarios_habilitados()');
-        console.log(`[itinerario] Query returned ${result.rows.length} rows`);
     } catch (err) {
         console.error('[itinerario] Query error:', err);
         throw err;
@@ -53,7 +51,6 @@ async function loadItinerarioIntoMemory() {
     }
 
     loaded = true;
-    console.log(`[itinerario] loaded linhas=${Object.keys(itinerarioByLinha).length} rows=${result.rows.length}`);
 }
 
 function isLoaded() {

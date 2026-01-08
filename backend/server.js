@@ -3,11 +3,12 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const { fetchRioGPSData } = require('./fetchers/rioFetcher');
 const { fetchAngraGPSData, fetchCircularLines } = require('./fetchers/angraFetcher');
-const { ensureFuturePartitions, saveRioOnibusSnapshot, loadLatestRioOnibusSnapshot, saveAngraOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./database/index');
+const { ensureFuturePartitions, loadLatestRioOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./database/index');
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
 const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
 const { resolveRioTimestamp, resolveAngraTimestamp, summarizeLines } = require('./utils/stats');
 const { loadItinerarioIntoMemory } = require('./itinerarioStore');
+const { startScheduler, stopScheduler } = require('./jobs');
 
 const app = express();
 
@@ -16,8 +17,6 @@ const AUTH_PASSWORD = process.env.AUTH_PASSWORD;
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const MULTI_ORDER_LIMIT = Number(process.env.MULTI_ORDER_LIMIT) || 5;
 
 if (!AUTH_USERNAME || !AUTH_PASSWORD) {
     console.error('[auth] AUTH_USERNAME and AUTH_PASSWORD must be set.');
@@ -130,115 +129,56 @@ if (API_BASE_PATH) {
 
 
 // Lifecycle helpers --------------------------------------------------------
-const PARTITION_CHECK_INTERVAL_MS = Number(process.env.PARTITION_CHECK_INTERVAL_MS) || 86400000;
-const COVERAGE_REPORT_INTERVAL_MS = Number(process.env.COVERAGE_REPORT_INTERVAL_MS) || 86400000;
-const SNAPSHOT_INTERVAL_MS = Number(process.env.SNAPSHOT_INTERVAL_MS) || 900000;
-const ITINERARIO_REFRESH_INTERVAL_MS = Number(process.env.ITINERARIO_REFRESH_INTERVAL_MS) || 6 * 60 * 60 * 1000;
+const CATCHUP_HOURS = Number(process.env.CATCHUP_HOURS) || 1;
 
-async function setupItinerarioCache() {
-    console.log('[itinerario] Loading itinerario cache');
-    try {
-        await loadItinerarioIntoMemory();
-    } catch (err) {
-        console.error('[itinerario] failed to load', err);
-        throw err;
-    }
-    setInterval(() => {
-        console.log('[itinerario] Refreshing itinerario cache');
-        loadItinerarioIntoMemory().catch(err => console.error('[itinerario] failed to refresh', err));
-    }, ITINERARIO_REFRESH_INTERVAL_MS);
-}
-
-function setupPartitionChecks() {
-    console.log(`[server] Running partition check (interval ${PARTITION_CHECK_INTERVAL_MS} ms)`);
-    ensureFuturePartitions();
-    setInterval(() => {
-        console.log('[server] Running scheduled partition check');
-        ensureFuturePartitions();
-    }, PARTITION_CHECK_INTERVAL_MS);
-}
-
-function setupCoverageReporting() {
-    console.log('[server] Generating initial sentido coverage report');
-    generateSentidoCoverageReport();
-    generateAngraRouteTypeReport();
-    setInterval(() => {
-        console.log('[server] Generating scheduled sentido coverage report');
-        generateSentidoCoverageReport();
-    }, COVERAGE_REPORT_INTERVAL_MS);
-    setInterval(() => {
-        console.log('[server] Generating scheduled angra route_type report');
-        generateAngraRouteTypeReport();
-    }, COVERAGE_REPORT_INTERVAL_MS);
-}
-
-function setupSnapshots() {
-    console.log('[server] Loading Rio snapshot');
-    loadLatestRioOnibusSnapshot()
+async function runInitialTasks() {
+    console.log('[bootstrap] Carregando snapshots...');
+    await loadLatestRioOnibusSnapshot()
         .then(snapshot => { if (snapshot) replaceRioOnibusSnapshot(snapshot); })
         .catch(err => console.error('[snapshot][rio] failed to load', err));
 
-    loadLatestAngraOnibusSnapshot()
+    await loadLatestAngraOnibusSnapshot()
         .then(snapshot => { if (snapshot) replaceAngraOnibusSnapshot(snapshot); })
         .catch(err => console.error('[snapshot][angra] failed to load', err));
 
-    setInterval(() => {
-        console.log('[server] Saving Rio snapshot');
-        saveRioOnibusSnapshot(getRioOnibus());
-    }, SNAPSHOT_INTERVAL_MS);
-    setInterval(() => {
-        console.log('[server] Saving Angra snapshot');
-        saveAngraOnibusSnapshot(getAngraOnibus());
-    }, SNAPSHOT_INTERVAL_MS);
-}
+    console.log('[bootstrap] Carregando itinerário...');
+    await loadItinerarioIntoMemory().catch(err => {
+        console.error('[itinerario] failed to load', err);
+        throw err;
+    });
 
-// Rio ----------------------------------------------------------------------
-const CATCHUP_HOURS = Number(process.env.CATCHUP_HOURS) || 1;
-const RIO_POLLING_INTERVAL_MS = Number(process.env.RIO_POLLING_INTERVAL_MS) || Number(process.env.POLLING_INTERVAL_MS) || 60000;
-const RIO_POLLING_WINDOW_MINUTES = Number(process.env.RIO_POLLING_WINDOW_MINUTES) || Number(process.env.POLLING_WINDOW_MINUTES) || 3;
-
-function setupRioPolling() {
-    console.log(`[Rio] Running catchup with window of ${CATCHUP_HOURS} hours...`);
-    fetchRioGPSData(CATCHUP_HOURS * 60, { skipEnrich: true, updateInMemoryStore: false });
-    console.log('[Rio] Starting polling...');
-    setInterval(() => {
-        console.log('[Rio] Fetching Rio GPS data (scheduled)');
-        fetchRioGPSData(RIO_POLLING_WINDOW_MINUTES);
-    }, RIO_POLLING_INTERVAL_MS);
-}
-
-// Angra --------------------------------------------------------------------
-const ANGRA_POLLING_INTERVAL_MS = Number(process.env.ANGRA_POLLING_INTERVAL_MS) || 60000;
-const ANGRA_CIRCULAR_LINES_POLL_MS = Number(process.env.ANGRA_CIRCULAR_LINES_POLL_MS) || 24 * 60 * 60 * 1000;
-
-async function setupAngraPolling() {
-    console.log('[Angra] Loading circular line definitions');
+    console.log('[bootstrap] Carregando linhas circulares de Angra...');
     await fetchCircularLines().catch(err => console.error('[Angra] Initial circular lines fetch failed', err));
 
-    console.log('[Angra] Starting polling...');
-    fetchAngraGPSData();
-    setInterval(() => {
-        console.log('[Angra] Fetching Angra GPS data (scheduled)');
-        fetchAngraGPSData();
-    }, ANGRA_POLLING_INTERVAL_MS);
-
-    setInterval(() => {
-        console.log('[Angra] Fetching circular line definitions (scheduled)');
-        fetchCircularLines();
-    }, ANGRA_CIRCULAR_LINES_POLL_MS);
+    console.log('[bootstrap] Executando verificação inicial de partições...');
+    await ensureFuturePartitions();
 }
 
 async function bootstrap() {
-    setupPartitionChecks();
-    setupCoverageReporting();
-    setupSnapshots();
-    await setupItinerarioCache();
-    setupRioPolling();
-    await setupAngraPolling();
+    await runInitialTasks();
+    await startScheduler();
 }
 
 bootstrap().catch(err => console.error('[server] bootstrap failed', err));
 
-app.listen(process.env.BACKEND_PORT || 3001, () => {
+const server = app.listen(process.env.BACKEND_PORT || 3001, () => {
     console.log('GPS Backend server running');
+});
+
+process.on('SIGTERM', async () => {
+    console.log('[server] SIGTERM received, shutting down...');
+    await stopScheduler();
+    server.close(() => {
+        console.log('[server] HTTP server closed');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', async () => {
+    console.log('[server] SIGINT received, shutting down...');
+    await stopScheduler();
+    server.close(() => {
+        console.log('[server] HTTP server closed');
+        process.exit(0);
+    });
 });

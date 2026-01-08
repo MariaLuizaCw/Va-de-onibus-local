@@ -17,7 +17,6 @@ async function login() {
         throw new Error('[Angra] Missing ANGRA_SSX_USERNAME or ANGRA_SSX_PASSWORD environment variables');
     }
 
-    console.log('[Angra] Logging in to SSX API...');
 
     const loginUrl = `${SSX_BASE_URL}/Login`;
     const params = new URLSearchParams({
@@ -46,7 +45,6 @@ async function login() {
         const tokenRefreshMs = Number(process.env.ANGRA_SSX_TOKEN_REFRESH_MS) || (5 * 60 * 60 * 1000);
         tokenExpiresAt = Date.now() + tokenRefreshMs;
 
-        console.log('[Angra] Login successful');
         return cachedToken;
     } catch (error) {
         console.error('[Angra] Login failed:', error.message);
@@ -113,16 +111,21 @@ async function fetchCircularLines() {
             .map(line => String(line.Number || '').trim())
             .filter(Boolean);
         circularLinesCache = new Set(circularNumbers);
-        console.log(`[Angra] Cached circular lines (${circularLinesCache.size}): ${circularNumbers.join(', ')}`);
     } catch (error) {
         console.error('[Angra] Failed to fetch circular lines:', error.message);
     }
 }
 
-async function fetchAngraGPSData(options = {}) {
-    const { updateInMemoryStore = true } = options;
-
-    console.log('[Angra] Fetching GPS data from SSX API...');
+async function fetchAngraGPSData(windowInMinutes = null, options = {}) {
+    if (windowInMinutes === null) {
+        windowInMinutes = Number(process.env.ANGRA_POLLING_WINDOW_MINUTES) || Number(process.env.POLLING_WINDOW_MINUTES) || 3;
+    }
+    const { 
+        updateInMemoryStore = true,
+        saveToDb = true,
+        saveToGpsSentido = true,
+        saveToGpsOnibusEstado = true
+    } = options;
 
     try {
         const token = await getToken();
@@ -142,7 +145,6 @@ async function fetchAngraGPSData(options = {}) {
         const records = response.data;
 
         if (!Array.isArray(records)) {
-            console.log('[Angra] No records returned or invalid response');
             return;
         }
 
@@ -162,14 +164,18 @@ async function fetchAngraGPSData(options = {}) {
             addPositions(enhancedRecords);
         }
 
-        await saveAngraRecordsToDb(enhancedRecords);
+        if (saveToDb) {
+            saveAngraRecordsToDb(enhancedRecords).catch(err => {
+                console.error('[Angra][gps_posicoes] Async insert failed:', err.message);
+            });
+        }
 
-        // Inserção assíncrona na tabela gps_sentido (não bloqueia o fluxo principal)
-        saveAngraToGpsSentido(enhancedRecords).catch(err => {
-            console.error('[Angra][gps_sentido] Async insert failed:', err.message);
-        });
+        if (saveToGpsSentido) {
+            saveAngraToGpsSentido(enhancedRecords).catch(err => {
+                console.error('[Angra][gps_sentido] Async insert failed:', err.message);
+            });
+        }
 
-        console.log(`[Angra] Success! Fetched ${records.length} records.`);
     } catch (error) {
         console.error(`[Angra] Error fetching data: ${error.message}`);
         

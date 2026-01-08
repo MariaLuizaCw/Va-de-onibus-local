@@ -3,8 +3,17 @@ const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido, saveR
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
-async function fetchRioGPSData(windowInMinutes = 3, options = {}) {
-    const { updateInMemoryStore = true, skipEnrich = false } = options;
+async function fetchRioGPSData(windowInMinutes = null, options = {}) {
+    if (windowInMinutes === null) {
+        windowInMinutes = Number(process.env.RIO_POLLING_WINDOW_MINUTES) || Number(process.env.POLLING_WINDOW_MINUTES) || 3;
+    }
+    const { 
+        updateInMemoryStore = true, 
+        skipEnrich = false,
+        saveToDb = true,
+        saveToGpsSentido = true,
+        saveToGpsOnibusEstado = true
+    } = options;
     const now = new Date();
 
     // overlap window configurável em minutos; default 3
@@ -13,14 +22,10 @@ async function fetchRioGPSData(windowInMinutes = 3, options = {}) {
     const dataInicial = formatDateInTimeZone(startWindow, API_TIMEZONE);
     const dataFinal = formatDateInTimeZone(now, API_TIMEZONE);
 
-    const startMsg = `[Rio] Polling GPS data: ${dataInicial} to ${dataFinal}`;
-    console.log(startMsg);
-
     // Log full URL used for fetchGPSData
     const urlBase = 'https://dados.mobilidade.rio/gps/sppo';
     const queryString = `?dataInicial=${encodeURIComponent(dataInicial)}&dataFinal=${encodeURIComponent(dataFinal)}`;
     const fullRequestUrl = `${urlBase}${queryString}`;
-    console.log(`[Rio] fetchGPSData URL: ${fullRequestUrl}`);
 
     try {
         const response = await axios.get(urlBase, {
@@ -39,20 +44,24 @@ async function fetchRioGPSData(windowInMinutes = 3, options = {}) {
             }
         }
         if (updateInMemoryStore) addPositions(records);
-        await saveRioRecordsToDb(records);
+        
+        if (saveToDb) {
+            saveRioRecordsToDb(records).catch(err => {
+                console.error('[Rio][gps_posicoes] Async insert failed:', err.message);
+            });
+        }
 
-        // Inserção assíncrona na tabela gps_sentido (não bloqueia o fluxo principal)
-        saveRioToGpsSentido(records).catch(err => {
-            console.error('[Rio][gps_sentido] Async insert failed:', err.message);
-        });
+        if (saveToGpsSentido) {
+            saveRioToGpsSentido(records).catch(err => {
+                console.error('[Rio][gps_sentido] Async insert failed:', err.message);
+            });
+        }
 
-        // Atualização assíncrona do estado dos ônibus (não bloqueia o fluxo principal)
-        saveRioToGpsOnibusEstado(records).catch(err => {
-            console.error('[Rio][gps_onibus_estado] Async upsert failed:', err.message);
-        });
-
-        const successMsg = `[Rio] Success! Fetched ${records.length} records.`;
-        console.log(successMsg);
+        if (saveToGpsOnibusEstado) {
+            saveRioToGpsOnibusEstado(records).catch(err => {
+                console.error('[Rio][gps_onibus_estado] Async upsert failed:', err.message);
+            });
+        }
     } catch (error) {
         const errorMsg = `[Rio] Error fetching data: ${error.message}`;
         console.error(errorMsg);

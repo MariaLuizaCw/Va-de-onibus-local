@@ -33,8 +33,7 @@ async function cleanupOldPartitionsForTable(tablePrefix, retentionDays = 7) {
     for (const { name } of tablesToDrop) {
         try {
             await dbPool.query(`DROP TABLE IF EXISTS public.${name};`);
-            console.log(`[partitions][${tablePrefix}] dropped ${name}`);
-        } catch (err) {
+            } catch (err) {
             console.error(`[partitions][${tablePrefix}] Error dropping partition`, name, err);
         }
     }

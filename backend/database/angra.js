@@ -19,12 +19,10 @@ async function saveAngraRecordsToDb(records) {
 
     const skippedCount = records.length - filteredRecords.length;
     if (filteredRecords.length === 0) {
-        console.log(`[Angra] All ${records.length} records filtered out (outside ${RETENTION_DAYS} day window: ${minDate.toISOString()} to ${now.toISOString()})`);
         return;
     }
 
     if (skippedCount > 0) {
-        console.log(`[Angra] Filtered ${skippedCount} records outside ${RETENTION_DAYS} day window: ${minDate.toISOString()} to ${now.toISOString()}`);
     }
 
     for (let i = 0; i < filteredRecords.length; i += BATCH_SIZE) {
@@ -158,12 +156,10 @@ async function saveAngraToGpsSentido(records) {
 
     const skippedCount = records.length - filteredRecords.length;
     if (filteredRecords.length === 0) {
-        console.log(`[Angra] All ${records.length} records filtered out (outside ${RETENTION_DAYS} day window: ${minDate.toISOString()} to ${now.toISOString()})`);
         return;
     }
 
     if (skippedCount > 0) {
-        console.log(`[Angra] Filtered ${skippedCount} records outside ${RETENTION_DAYS} day window: ${minDate.toISOString()} to ${now.toISOString()}`);
     }
 
     for (let i = 0; i < filteredRecords.length; i += BATCH_SIZE) {

@@ -8,7 +8,6 @@ async function enrichRecordsWithSentido(records) {
     if (!Array.isArray(records) || records.length === 0) return records;
 
     const BATCH_SIZE = Number(process.env.SENTIDO_BATCH_SIZE) || 2000;
-    const PARAMS_PER_ROW = 4;
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE);
@@ -114,19 +113,6 @@ async function saveRioToGpsSentido(records) {
         return dt >= minDate && dt <= now;
     });
 
-    const skippedCount = records.length - filteredRecords.length;
-    if (filteredRecords.length === 0) {
-        console.log(
-            `[Rio][gps_sentido] All ${records.length} records filtered out (outside ${retention_days} day window: ${formatDateInTimeZone(minDate)} to ${formatDateInTimeZone(now)})`
-        );
-        return;
-    }
-
-    if (skippedCount > 0) {
-        console.log(
-            `[Rio][gps_sentido] Filtered ${skippedCount} records outside ${retention_days} day window: ${formatDateInTimeZone(minDate)} to ${formatDateInTimeZone(now)}`
-        );
-    }
 
     for (let i = 0; i < filteredRecords.length; i += BATCH_SIZE) {
         const batch = filteredRecords.slice(i, i + BATCH_SIZE);

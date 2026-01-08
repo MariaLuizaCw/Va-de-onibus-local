@@ -14,7 +14,6 @@ async function generateSentidoCoverageReport() {
             [reportDate, API_TIMEZONE, MAX_SNAP_DISTANCE_METERS]
         );
         const rowCount = result.rows[0]?.fn_generate_sentido_coverage_report || 0;
-        console.log(`[coverage][rio] Generated sentido coverage report for ${reportDate}: ${rowCount} lines`);
     } catch (err) {
         console.error('[coverage][rio]  Error generating sentido coverage report:', err);
     }
@@ -31,7 +30,6 @@ async function generateAngraRouteTypeReport() {
             [reportDate, API_TIMEZONE]
         );
         const rowCount = result.rows[0]?.fn_generate_angra_route_type_report || 0;
-        console.log(`[coverage][angra] Generated undefined route_type report for ${reportDate}: ${rowCount} lines`);
     } catch (err) {
         console.error('[coverage][angra] Error generating Angra route_type report:', err);
     }
