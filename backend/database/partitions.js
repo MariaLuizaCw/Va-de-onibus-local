@@ -8,14 +8,7 @@ async function cleanupOldPartitionsForTable(tablePrefix, retentionDays = 7) {
 
     let result;
     try {
-        result = await dbPool.query(
-            `
-            SELECT tablename
-            FROM pg_tables
-            WHERE schemaname = 'public'
-              AND tablename LIKE '${tablePrefix}_%'
-            `
-        );
+        result = await dbPool.query('SELECT * FROM fn_list_partition_tables($1)', [tablePrefix]);
     } catch (err) {
         console.error(`[partitions][${tablePrefix}] Error listing partition tables`, err);
         return;

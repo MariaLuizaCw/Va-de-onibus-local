@@ -1,21 +1,14 @@
 const { dbPool } = require('./pool');
 
 async function loadOnibusSnapshot(city = 'rio') {
-    const text = `
-        SELECT data
-        FROM public.onibus_snapshots
-        WHERE city = $1
-        LIMIT 1;
-    `;
-
     try {
-        const result = await dbPool.query(text, [city]);
-        if (!result.rows || result.rows.length === 0) {
+        const result = await dbPool.query('SELECT * FROM fn_load_onibus_snapshot($1)', [city]);
+        if (!result.rows || result.rows.length === 0 || !result.rows[0].fn_load_onibus_snapshot) {
             console.log(`[snapshot][${city}] No snapshot found in database`);
             return null;
         }
         console.log(`[snapshot][${city}] Loaded snapshot from database`);
-        return result.rows[0].data || null;
+        return result.rows[0].fn_load_onibus_snapshot || null;
     } catch (err) {
         console.error(`[snapshot][${city}] Error loading snapshot from database:`, err);
         return null;
@@ -26,8 +19,7 @@ async function saveOnibusSnapshot(snapshot, city = 'rio') {
     if (!snapshot) return;
 
     try {
-        await dbPool.query('DELETE FROM public.onibus_snapshots WHERE city = $1', [city]);
-        await dbPool.query('INSERT INTO public.onibus_snapshots (city, data) VALUES ($1, $2::jsonb)', [city, snapshot]);
+        await dbPool.query('SELECT fn_save_onibus_snapshot($1, $2::jsonb)', [city, snapshot]);
         console.log(`[snapshot][${city}] Saved snapshot to database`);
     } catch (err) {
         console.error(`[snapshot][${city}] Error inserting snapshot into database:`, err);

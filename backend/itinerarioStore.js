@@ -19,20 +19,9 @@ async function loadItinerarioIntoMemory() {
         delete itinerarioByLinha[key];
     }
 
-    const text = `
-        SELECT
-            numero_linha,
-            sentido,
-            id AS itinerario_id,
-            route_name,
-            ST_AsGeoJSON(the_geom)::json AS geom
-        FROM public.itinerario
-        WHERE habilitado = true
-    `;
-
     let result;
     try {
-        result = await getDbPool().query(text);
+        result = await getDbPool().query('SELECT * FROM fn_get_itinerarios_habilitados()');
         console.log(`[itinerario] Query returned ${result.rows.length} rows`);
     } catch (err) {
         console.error('[itinerario] Query error:', err);

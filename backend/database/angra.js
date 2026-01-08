@@ -30,84 +30,41 @@ async function saveAngraRecordsToDb(records) {
     for (let i = 0; i < filteredRecords.length; i += BATCH_SIZE) {
         const batch = filteredRecords.slice(i, i + BATCH_SIZE);
 
-        const values = [];
-        const placeholders = [];
-
-        batch.forEach((record, index) => {
-            values.push(
-                record.VehicleIntegrationCode,
-                record.VehicleDescription,
-                record.LineIntegrationCode,
-                record.LineNumber,
-                record.LineDescription,
-                record.RouteIntegrationCode,
-                record.RouteDirection,
-                record.RouteDescription,
-                record.EstimatedDepartureDate,
-                record.EstimatedArrivalDate,
-                record.RealDepartureDate,
-                record.RealArrivalDate,
-                record.Shift,
-                record.Latitude,
-                record.Longitude,
-                record.EventDate,
-                record.UpdateDate,
-                record.Speed,
-                record.Direction,
-                record.EventCode,
-                record.EventName,
-                record.IsRouteStartPoint,
-                record.IsRouteEndPoint,
-                record.IsGarage,
-                record.LicensePlate,
-                record.ClientBusIntegrationCode,
-                record.RouteType
-            );
-
-            const baseIndex = index * PARAMS_PER_ROW;
-            const params = [];
-            for (let p = 1; p <= PARAMS_PER_ROW; p++) {
-                params.push(`$${baseIndex + p}`);
-            }
-            placeholders.push(`(${params.join(', ')})`);
-        });
-
-        const text = `
-            INSERT INTO gps_posicoes_angra (
-                vehicle_integration_code,
-                vehicle_description,
-                line_integration_code,
-                line_number,
-                line_description,
-                route_integration_code,
-                route_direction,
-                route_description,
-                estimated_departure_date,
-                estimated_arrival_date,
-                real_departure_date,
-                real_arrival_date,
-                shift,
-                latitude,
-                longitude,
-                event_date,
-                update_date,
-                speed,
-                direction,
-                event_code,
-                event_name,
-                is_route_start_point,
-                is_route_end_point,
-                is_garage,
-                license_plate,
-                client_bus_integration_code,
-                route_type
-            ) VALUES
-                ${placeholders.join(',\n')}
-            ON CONFLICT ON CONSTRAINT gps_posicoes_angra_unique_ponto DO NOTHING;
-        `;
+        const recordsJson = batch.map(record => ({
+            vehicle_integration_code: record.VehicleIntegrationCode,
+            vehicle_description: record.VehicleDescription,
+            line_integration_code: record.LineIntegrationCode,
+            line_number: record.LineNumber,
+            line_description: record.LineDescription,
+            route_integration_code: record.RouteIntegrationCode,
+            route_direction: record.RouteDirection,
+            route_description: record.RouteDescription,
+            estimated_departure_date: record.EstimatedDepartureDate,
+            estimated_arrival_date: record.EstimatedArrivalDate,
+            real_departure_date: record.RealDepartureDate,
+            real_arrival_date: record.RealArrivalDate,
+            shift: record.Shift,
+            latitude: record.Latitude,
+            longitude: record.Longitude,
+            event_date: record.EventDate,
+            update_date: record.UpdateDate,
+            speed: record.Speed,
+            direction: record.Direction,
+            event_code: record.EventCode,
+            event_name: record.EventName,
+            is_route_start_point: record.IsRouteStartPoint,
+            is_route_end_point: record.IsRouteEndPoint,
+            is_garage: record.IsGarage,
+            license_plate: record.LicensePlate,
+            client_bus_integration_code: record.ClientBusIntegrationCode,
+            route_type: record.RouteType
+        }));
 
         try {
-            await dbPool.query(text, values);
+            await dbPool.query(
+                'SELECT fn_insert_gps_posicoes_angra_batch_json($1::jsonb)',
+                [JSON.stringify(recordsJson)]
+            );
         } catch (err) {
             console.error('[Angra] Error inserting GPS records into database:', err);
         }
@@ -190,8 +147,6 @@ async function enrichAngraRecordsWithSentido(records) {
 async function saveAngraToGpsSentido(records) {
     if (!records || records.length === 0) return;
     const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
-    const PARAMS_PER_ROW = 10;
-
 
     // Filtra registros que estão dentro do período de retenção (partições existentes)
     const now = new Date(new Date().toLocaleString('en-US', { timeZone: API_TIMEZONE }));
@@ -211,54 +166,27 @@ async function saveAngraToGpsSentido(records) {
         console.log(`[Angra] Filtered ${skippedCount} records outside ${RETENTION_DAYS} day window: ${minDate.toISOString()} to ${now.toISOString()}`);
     }
 
-
     for (let i = 0; i < filteredRecords.length; i += BATCH_SIZE) {
         const batch = filteredRecords.slice(i, i + BATCH_SIZE);
 
-        const values = [];
-        const placeholders = [];
-
-        batch.forEach((record, index) => {
-            const datahoraTimestamp = record.EventDate;
-
-            values.push(
-                record.VehicleIntegrationCode,
-                datahoraTimestamp,
-                record.LineNumber,
-                Number(record.Latitude),
-                Number(record.Longitude),
-                Number(record.Speed),
-                record.sentido_enriched || null,
-                record.sentido_itinerario_id || null,
-                record.route_name || null,
-                'Bonfim'
-            );
-
-            const baseIndex = index * PARAMS_PER_ROW;
-            placeholders.push(
-                `($${baseIndex + 1}, $${baseIndex + 2}::timestamp, $${baseIndex + 3}, $${baseIndex + 4}, $${baseIndex + 5}, $${baseIndex + 6}, $${baseIndex + 7}, $${baseIndex + 8}, $${baseIndex + 9}, $${baseIndex + 10})`
-            );
-        });
-
-        const text = `
-            INSERT INTO gps_sentido (
-                ordem,
-                datahora,
-                linha,
-                latitude,
-                longitude,
-                velocidade,
-                sentido,
-                sentido_itinerario_id,
-                route_name,
-                token
-            ) VALUES
-                ${placeholders.join(',\n')}
-            ON CONFLICT (ordem, datahora) DO NOTHING;
-        `;
+        const recordsJson = batch.map(record => ({
+            ordem: record.VehicleIntegrationCode,
+            datahora: record.EventDate,
+            linha: record.LineNumber,
+            latitude: Number(record.Latitude),
+            longitude: Number(record.Longitude),
+            velocidade: Number(record.Speed),
+            sentido: record.sentido_enriched || null,
+            sentido_itinerario_id: record.sentido_itinerario_id || null,
+            route_name: record.route_name || null,
+            token: 'Bonfim'
+        }));
 
         try {
-            await dbPool.query(text, values);
+            await dbPool.query(
+                'SELECT fn_insert_gps_sentido_angra_batch_json($1::jsonb)',
+                [JSON.stringify(recordsJson)]
+            );
         } catch (err) {
             console.error('[Angra][gps_sentido] Error inserting records:', err.message);
         }
