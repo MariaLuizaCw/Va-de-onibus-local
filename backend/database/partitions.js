@@ -2,13 +2,9 @@ const { dbPool } = require('./pool');
 const { API_TIMEZONE, formatDateYYYYMMDDInTimeZone } = require('../utils');
 
 async function cleanupOldPartitionsForTable(tablePrefix, retentionDays = 7) {
-    const todaySpStr = formatDateYYYYMMDDInTimeZone(new Date(), API_TIMEZONE);
-
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
     const cutoffSpStr = formatDateYYYYMMDDInTimeZone(cutoffDate, API_TIMEZONE);
-
-    console.log(`[partitions][${tablePrefix}] cleanup start tz=${API_TIMEZONE} today=${todaySpStr} retentionDays=${retentionDays} cutoff=${cutoffSpStr}`);
 
     let result;
     try {
@@ -25,8 +21,6 @@ async function cleanupOldPartitionsForTable(tablePrefix, retentionDays = 7) {
         return;
     }
 
-    console.log(`[partitions][${tablePrefix}] found ${result.rows.length} tables matching ${tablePrefix}_%`);
-
     const prefixLen = tablePrefix.length + 1; // +1 for underscore
     const regex = new RegExp(`^${tablePrefix}_\\d{8}$`);
 
@@ -39,30 +33,18 @@ async function cleanupOldPartitionsForTable(tablePrefix, retentionDays = 7) {
             const d = name.slice(prefixLen + 6, prefixLen + 8);
             return { name, dateStr: `${y}-${m}-${d}` };
         })
-        .filter(({ dateStr }) => dateStr < cutoffSpStr)
-        .sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+        .filter(({ dateStr }) => dateStr < cutoffSpStr);
 
-    if (tablesToDrop.length === 0) {
-        console.log(`[partitions][${tablePrefix}] nothing to drop (cutoff=${cutoffSpStr})`);
-        return;
-    }
+    if (tablesToDrop.length === 0) return;
 
-    console.log(
-        `[partitions][${tablePrefix}] will drop ${tablesToDrop.length} partitions older than ${cutoffSpStr}: ${tablesToDrop
-            .map((t) => `${t.name}(${t.dateStr})`)
-            .join(', ')}`
-    );
-
-    for (const { name, dateStr } of tablesToDrop) {
+    for (const { name } of tablesToDrop) {
         try {
-            console.log(`[partitions][${tablePrefix}] dropping ${name} (date=${dateStr})`);
             await dbPool.query(`DROP TABLE IF EXISTS public.${name};`);
+            console.log(`[partitions][${tablePrefix}] dropped ${name}`);
         } catch (err) {
-            console.error(`[partitions][${tablePrefix}] Error dropping partition`, name, dateStr, { cutoffSpStr, todaySpStr }, err);
+            console.error(`[partitions][${tablePrefix}] Error dropping partition`, name, err);
         }
     }
-
-    console.log(`[partitions][${tablePrefix}] cleanup done dropped=${tablesToDrop.length}`);
 }
 
 async function cleanupOldPartitions(retentionDays = 7) {
@@ -97,7 +79,6 @@ async function createPartitionForDate(tablePrefix, dateStr, partitionType = 'big
 
     try {
         await dbPool.query(text);
-        console.log(`[partitions][${tablePrefix}] created partition ${tableName}`);
     } catch (err) {
         if (!err.message.includes('already exists')) {
             console.error(`[partitions][${tablePrefix}] Error creating partition for date`, dateStr, err);

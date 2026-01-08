@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido } = require('../database/index');
+const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido, saveRioToGpsOnibusEstado } = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -44,6 +44,11 @@ async function fetchRioGPSData(windowInMinutes = 3, options = {}) {
         // Inserção assíncrona na tabela gps_sentido (não bloqueia o fluxo principal)
         saveRioToGpsSentido(records).catch(err => {
             console.error('[Rio][gps_sentido] Async insert failed:', err.message);
+        });
+
+        // Atualização assíncrona do estado dos ônibus (não bloqueia o fluxo principal)
+        saveRioToGpsOnibusEstado(records).catch(err => {
+            console.error('[Rio][gps_onibus_estado] Async upsert failed:', err.message);
         });
 
         const successMsg = `[Rio] Success! Fetched ${records.length} records.`;
