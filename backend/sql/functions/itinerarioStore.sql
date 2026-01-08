@@ -30,18 +30,5 @@ AS $$
 $$;
 
 -- =============================================================================
--- ÍNDICES RECOMENDADOS
--- =============================================================================
-
--- Índice para busca de itinerários por linha
-CREATE INDEX IF NOT EXISTS idx_itinerario_numero_linha_habilitado 
-ON public.itinerario (numero_linha) 
-WHERE habilitado = true;
-
--- Índice espacial para geometria de itinerários
-CREATE INDEX IF NOT EXISTS idx_itinerario_the_geom_gist 
-ON public.itinerario USING GIST (the_geom);
-
--- =============================================================================
 -- FIM DO SCRIPT
 -- =============================================================================
