@@ -23,7 +23,7 @@ done
 # ⚠️ ajuste se o nome do container for outro
 POSTGRES_CONTAINER_NAME=vadeonibus-db
 
-SQL_DIR="backend/sql/functions"
+SQL_DIR="database/functions"
 
 if [ ! -d "$SQL_DIR" ]; then
   echo "❌ Diretório $SQL_DIR não encontrado"
