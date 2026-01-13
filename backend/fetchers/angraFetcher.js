@@ -165,15 +165,15 @@ async function fetchAngraGPSData(windowInMinutes = null, options = {}) {
         }
 
         if (saveToDb) {
-            saveAngraRecordsToDb(enhancedRecords).catch(err => {
-                console.error('[Angra][gps_posicoes] Async insert failed:', err.message);
-            });
+            saveAngraRecordsToDb(enhancedRecords)
+                .then(() => console.log(`[Angra][gps_posicoes] Sucesso: ${enhancedRecords.length} registros`))
+                .catch(err => console.error('[Angra][gps_posicoes] Falha:', err.message));
         }
 
         if (saveToGpsSentido) {
-            saveAngraToGpsSentido(enhancedRecords).catch(err => {
-                console.error('[Angra][gps_sentido] Async insert failed:', err.message);
-            });
+            saveAngraToGpsSentido(enhancedRecords)
+                .then(() => console.log(`[Angra][gps_sentido] Sucesso: ${enhancedRecords.length} registros`))
+                .catch(err => console.error('[Angra][gps_sentido] Falha:', err.message));
         }
 
     } catch (error) {

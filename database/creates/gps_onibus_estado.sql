@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS public.gps_onibus_estado
     terminal_proximo text COLLATE pg_catalog."default",
     distancia_terminal_metros numeric,
     desde_terminal_proximo timestamp without time zone,
+    ate_terminal_proximo timestamp without time zone,
     atualizado_em timestamp without time zone DEFAULT now(),
     CONSTRAINT gps_onibus_estado_pkey PRIMARY KEY (ordem)
 )

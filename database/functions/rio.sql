@@ -7,6 +7,13 @@
 -- fn_enrich_gps_batch_with_sentido_json
 -- Calcula o sentido mais próximo para múltiplos pontos GPS usando PostGIS
 -- Recebe JSON array e usa jsonb_to_recordset para processar
+-- 
+-- LÓGICA DE PRIORIDADE:
+-- 1. Último terminal (gps_onibus_estado.ultimo_terminal) se dist <= 300m
+-- 2. Terminal próximo se janela (ate - desde) <= 10 min e dist <= 300m
+-- 3. Fallback: itinerário mais próximo por distância se dist <= 300m
+-- 4. INDEFINIDO se dist > 300m de qualquer itinerário
+--
 -- Usado por: rio.js -> enrichRecordsWithSentido (batch)
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_enrich_gps_batch_with_sentido_json(
@@ -31,41 +38,116 @@ AS $$
             (r.value->>'lat')::double precision AS lat,
             (r.value->>'ordem')::text AS ordem
         FROM jsonb_array_elements(p_points) r
-    )
-    SELECT
-        pts.linha,
-        pts.ordem,
-        best.sentido,
-        best.dist_m,
-        best.itinerario_id,
-        best.route_name
-    FROM pts
-    LEFT JOIN LATERAL (
+    ),
+    -- Join com estado do ônibus para obter ultimo_terminal e terminal_proximo
+    pts_with_estado AS (
         SELECT
+            pts.linha,
+            pts.lon,
+            pts.lat,
+            pts.ordem,
+            e.ultimo_terminal,
+            e.terminal_proximo,
+            e.desde_terminal_proximo,
+            e.ate_terminal_proximo
+        FROM pts
+        LEFT JOIN public.gps_onibus_estado e ON e.ordem = pts.ordem
+    ),
+    -- REGRA 1: Último terminal (prioridade máxima)
+    regra1_ultimo_terminal AS (
+        SELECT DISTINCT ON (p.ordem)
+            p.ordem,
+            p.linha,
             i.sentido,
             i.id AS itinerario_id,
             i.route_name,
             ST_Distance(
                 i.the_geom::geography,
-                ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326)::geography
+                ST_SetSRID(ST_MakePoint(p.lon, p.lat), 4326)::geography
             ) AS dist_m
-        FROM public.itinerario i
-        WHERE i.habilitado = true
-          AND i.numero_linha::text = pts.linha
+        FROM pts_with_estado p
+        INNER JOIN public.itinerario i
+            ON i.habilitado = true
+            AND i.numero_linha::text = p.linha
+            AND i.sentido = p.ultimo_terminal
+        WHERE p.ultimo_terminal IS NOT NULL
           AND ST_DWithin(
                 i.the_geom::geography,
-                ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(p.lon, p.lat), 4326)::geography,
                 p_max_snap_distance_meters
           )
-        ORDER BY dist_m ASC
-        LIMIT 1
-    ) best ON true;
+        ORDER BY p.ordem, dist_m ASC
+    ),
+    -- REGRA 2: Terminal próximo (janela <= 10 min)
+    regra2_terminal_proximo AS (
+        SELECT DISTINCT ON (p.ordem)
+            p.ordem,
+            p.linha,
+            i.sentido,
+            i.id AS itinerario_id,
+            i.route_name,
+            ST_Distance(
+                i.the_geom::geography,
+                ST_SetSRID(ST_MakePoint(p.lon, p.lat), 4326)::geography
+            ) AS dist_m
+        FROM pts_with_estado p
+        INNER JOIN public.itinerario i
+            ON i.habilitado = true
+            AND i.numero_linha::text = p.linha
+            AND i.sentido = p.terminal_proximo
+        WHERE p.terminal_proximo IS NOT NULL
+          AND p.desde_terminal_proximo IS NOT NULL
+          AND p.ate_terminal_proximo IS NOT NULL
+          AND (p.ate_terminal_proximo - p.desde_terminal_proximo) <= INTERVAL '10 minutes'
+          AND ST_DWithin(
+                i.the_geom::geography,
+                ST_SetSRID(ST_MakePoint(p.lon, p.lat), 4326)::geography,
+                p_max_snap_distance_meters
+          )
+        ORDER BY p.ordem, dist_m ASC
+    ),
+    -- REGRA 3: Fallback por distância (comportamento atual)
+    regra3_fallback AS (
+        SELECT DISTINCT ON (p.ordem)
+            p.ordem,
+            p.linha,
+            i.sentido,
+            i.id AS itinerario_id,
+            i.route_name,
+            ST_Distance(
+                i.the_geom::geography,
+                ST_SetSRID(ST_MakePoint(p.lon, p.lat), 4326)::geography
+            ) AS dist_m
+        FROM pts_with_estado p
+        INNER JOIN public.itinerario i
+            ON i.habilitado = true
+            AND i.numero_linha::text = p.linha
+        WHERE ST_DWithin(
+                i.the_geom::geography,
+                ST_SetSRID(ST_MakePoint(p.lon, p.lat), 4326)::geography,
+                p_max_snap_distance_meters
+          )
+        ORDER BY p.ordem, dist_m ASC
+    )
+    -- Combinar regras com prioridade: 1 > 2 > 3 > 4 (INDEFINIDO)
+    SELECT
+        p.linha,
+        p.ordem,
+        COALESCE(r1.sentido, r2.sentido, r3.sentido) AS sentido,
+        COALESCE(r1.dist_m, r2.dist_m, r3.dist_m) AS dist_m,
+        COALESCE(r1.itinerario_id, r2.itinerario_id, r3.itinerario_id) AS itinerario_id,
+        COALESCE(r1.route_name, r2.route_name, r3.route_name) AS route_name
+    FROM pts_with_estado p
+    LEFT JOIN regra1_ultimo_terminal r1 ON r1.ordem = p.ordem
+    LEFT JOIN regra2_terminal_proximo r2 ON r2.ordem = p.ordem AND r1.ordem IS NULL
+    LEFT JOIN regra3_fallback r3 ON r3.ordem = p.ordem AND r1.ordem IS NULL AND r2.ordem IS NULL;
 $$;
 
 -- -----------------------------------------------------------------------------
 -- fn_upsert_gps_onibus_estado_batch_json
 -- Atualiza o estado dos ônibus com base na proximidade aos terminais
 -- Recebe JSON array e usa jsonb_to_recordset para processar
+-- Registra intervalo de permanência: desde_terminal_proximo (início) e ate_terminal_proximo (fim)
 -- Usado por: rio.js -> saveRioToGpsOnibusEstado (batch)
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_upsert_gps_onibus_estado_batch_json(
@@ -120,6 +202,7 @@ BEGIN
             bt.datahora,
             bt.sentido,
             bt.dist_m,
+            -- Visita ao terminal (dist <= visit_distance)
             CASE
                 WHEN bt.dist_m <= p_terminal_visit_distance_meters THEN bt.sentido
                 ELSE NULL
@@ -128,6 +211,7 @@ BEGIN
                 WHEN bt.dist_m <= p_terminal_visit_distance_meters THEN bt.datahora
                 ELSE NULL
             END AS new_ultima_passagem,
+            -- Proximidade ao terminal (visit_distance < dist <= proximity_distance)
             CASE
                 WHEN bt.dist_m > p_terminal_visit_distance_meters AND bt.dist_m <= p_terminal_proximity_distance_meters THEN bt.sentido
                 ELSE NULL
@@ -139,7 +223,11 @@ BEGIN
             CASE
                 WHEN bt.dist_m > p_terminal_visit_distance_meters AND bt.dist_m <= p_terminal_proximity_distance_meters THEN bt.datahora
                 ELSE NULL
-            END AS new_desde_terminal_proximo
+            END AS new_desde_terminal_proximo,
+            CASE
+                WHEN bt.dist_m > p_terminal_visit_distance_meters AND bt.dist_m <= p_terminal_proximity_distance_meters THEN bt.datahora
+                ELSE NULL
+            END AS new_ate_terminal_proximo
         FROM best_terminal bt
     )
     INSERT INTO gps_onibus_estado (
@@ -151,6 +239,7 @@ BEGIN
         terminal_proximo,
         distancia_terminal_metros,
         desde_terminal_proximo,
+        ate_terminal_proximo,
         atualizado_em
     )
     SELECT
@@ -162,11 +251,13 @@ BEGIN
         ud.new_terminal_proximo,
         ud.new_distancia_terminal,
         ud.new_desde_terminal_proximo,
+        ud.new_ate_terminal_proximo,
         now()
     FROM upsert_data ud
     ON CONFLICT (ordem) DO UPDATE SET
         linha = EXCLUDED.linha,
         token = EXCLUDED.token,
+        -- Regra 1: Visita ao terminal - atualiza terminal e limpa proximidade
         ultimo_terminal = CASE
             WHEN EXCLUDED.ultimo_terminal != '' THEN EXCLUDED.ultimo_terminal
             ELSE gps_onibus_estado.ultimo_terminal
@@ -175,6 +266,7 @@ BEGIN
             WHEN EXCLUDED.ultimo_terminal != '' THEN EXCLUDED.ultima_passagem_terminal
             ELSE gps_onibus_estado.ultima_passagem_terminal
         END,
+        -- Regra 1: Limpa terminal_proximo e timestamps quando visita
         terminal_proximo = CASE
             WHEN EXCLUDED.ultimo_terminal != '' THEN NULL
             ELSE EXCLUDED.terminal_proximo
@@ -183,6 +275,7 @@ BEGIN
             WHEN EXCLUDED.ultimo_terminal != '' THEN NULL
             ELSE EXCLUDED.distancia_terminal_metros
         END,
+        -- Regra 2: desde_terminal_proximo - mantém se mesmo terminal, senão atualiza
         desde_terminal_proximo = CASE
             WHEN EXCLUDED.ultimo_terminal != '' THEN NULL
             WHEN EXCLUDED.terminal_proximo IS NOT NULL
@@ -190,6 +283,12 @@ BEGIN
                 AND gps_onibus_estado.desde_terminal_proximo IS NOT NULL
             THEN gps_onibus_estado.desde_terminal_proximo
             ELSE EXCLUDED.desde_terminal_proximo
+        END,
+        -- Regra 2: ate_terminal_proximo - sempre atualiza quando no raio de proximidade
+        ate_terminal_proximo = CASE
+            WHEN EXCLUDED.ultimo_terminal != '' THEN NULL
+            WHEN EXCLUDED.terminal_proximo IS NOT NULL THEN EXCLUDED.ate_terminal_proximo
+            ELSE gps_onibus_estado.ate_terminal_proximo
         END,
         atualizado_em = now();
 END;

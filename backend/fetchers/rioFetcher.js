@@ -46,21 +46,21 @@ async function fetchRioGPSData(windowInMinutes = null, options = {}) {
         if (updateInMemoryStore) addPositions(records);
         
         if (saveToDb) {
-            saveRioRecordsToDb(records).catch(err => {
-                console.error('[Rio][gps_posicoes] Async insert failed:', err.message);
-            });
+            saveRioRecordsToDb(records)
+                .then(() => console.log(`[Rio][gps_posicoes] Sucesso: ${records.length} registros`))
+                .catch(err => console.error('[Rio][gps_posicoes] Falha:', err.message));
         }
 
         if (saveToGpsSentido) {
-            saveRioToGpsSentido(records).catch(err => {
-                console.error('[Rio][gps_sentido] Async insert failed:', err.message);
-            });
+            saveRioToGpsSentido(records)
+                .then(() => console.log(`[Rio][gps_sentido] Sucesso: ${records.length} registros`))
+                .catch(err => console.error('[Rio][gps_sentido] Falha:', err.message));
         }
 
         if (saveToGpsOnibusEstado) {
-            saveRioToGpsOnibusEstado(records).catch(err => {
-                console.error('[Rio][gps_onibus_estado] Async upsert failed:', err.message);
-            });
+            saveRioToGpsOnibusEstado(records)
+                .then(() => console.log(`[Rio][gps_onibus_estado] Sucesso: ${records.length} registros`))
+                .catch(err => console.error('[Rio][gps_onibus_estado] Falha:', err.message));
         }
     } catch (error) {
         const errorMsg = `[Rio] Error fetching data: ${error.message}`;
