@@ -51,7 +51,7 @@ AS $$
             e.desde_terminal_proximo,
             e.ate_terminal_proximo
         FROM pts
-        LEFT JOIN public.gps_onibus_estado e ON e.ordem = pts.ordem
+        LEFT JOIN public.gps_onibus_estado e ON e.ordem = pts.ordem AND e.ativo = true
     ),
     -- REGRA 1: Último terminal (prioridade máxima)
     regra1_ultimo_terminal AS (
@@ -133,7 +133,7 @@ AS $$
     SELECT
         p.linha,
         p.ordem,
-        COALESCE(r1.sentido, r2.sentido, r3.sentido) AS sentido,
+        COALESCE(r1.sentido, r2.sentido, r3.sentido, 'garagem') AS sentido,
         COALESCE(r1.dist_m, r2.dist_m, r3.dist_m) AS dist_m,
         COALESCE(r1.itinerario_id, r2.itinerario_id, r3.itinerario_id) AS itinerario_id,
         COALESCE(r1.route_name, r2.route_name, r3.route_name) AS route_name
@@ -240,44 +240,48 @@ BEGIN
         distancia_terminal_metros,
         desde_terminal_proximo,
         ate_terminal_proximo,
-        atualizado_em
+        atualizado_em,
+        ativo
     )
     SELECT
         ud.ordem,
         ud.linha,
         'PMRJ',
-        COALESCE(ud.new_ultimo_terminal, ''),
+        ud.new_ultimo_terminal,
         ud.new_ultima_passagem,
         ud.new_terminal_proximo,
         ud.new_distancia_terminal,
         ud.new_desde_terminal_proximo,
         ud.new_ate_terminal_proximo,
-        now()
+        now(),
+        true
     FROM upsert_data ud
     ON CONFLICT (ordem) DO UPDATE SET
         linha = EXCLUDED.linha,
         token = EXCLUDED.token,
+        ativo = true,
         -- Regra 1: Visita ao terminal - atualiza terminal e limpa proximidade
         ultimo_terminal = CASE
-            WHEN EXCLUDED.ultimo_terminal != '' THEN EXCLUDED.ultimo_terminal
+            WHEN EXCLUDED.ultimo_terminal IS NOT NULL THEN EXCLUDED.ultimo_terminal
             ELSE gps_onibus_estado.ultimo_terminal
         END,
         ultima_passagem_terminal = CASE
-            WHEN EXCLUDED.ultimo_terminal != '' THEN EXCLUDED.ultima_passagem_terminal
+            WHEN EXCLUDED.ultimo_terminal IS NOT NULL THEN EXCLUDED.ultima_passagem_terminal
             ELSE gps_onibus_estado.ultima_passagem_terminal
         END,
         -- Regra 1: Limpa terminal_proximo e timestamps quando visita
         terminal_proximo = CASE
-            WHEN EXCLUDED.ultimo_terminal != '' THEN NULL
+            WHEN EXCLUDED.ultimo_terminal IS NOT NULL THEN NULL
             ELSE EXCLUDED.terminal_proximo
         END,
         distancia_terminal_metros = CASE
-            WHEN EXCLUDED.ultimo_terminal != '' THEN NULL
+            WHEN EXCLUDED.ultimo_terminal IS NOT NULL THEN NULL
             ELSE EXCLUDED.distancia_terminal_metros
         END,
         -- Regra 2: desde_terminal_proximo - mantém se mesmo terminal, senão atualiza
         desde_terminal_proximo = CASE
-            WHEN EXCLUDED.ultimo_terminal != '' THEN NULL
+            WHEN EXCLUDED.ultimo_terminal IS NOT NULL THEN NULL
+            WHEN EXCLUDED.terminal_proximo IS NULL THEN NULL
             WHEN EXCLUDED.terminal_proximo IS NOT NULL
                 AND gps_onibus_estado.terminal_proximo = EXCLUDED.terminal_proximo
                 AND gps_onibus_estado.desde_terminal_proximo IS NOT NULL
@@ -286,7 +290,8 @@ BEGIN
         END,
         -- Regra 2: ate_terminal_proximo - sempre atualiza quando no raio de proximidade
         ate_terminal_proximo = CASE
-            WHEN EXCLUDED.ultimo_terminal != '' THEN NULL
+            WHEN EXCLUDED.ultimo_terminal IS NOT NULL THEN NULL
+            WHEN EXCLUDED.terminal_proximo IS NULL THEN NULL
             WHEN EXCLUDED.terminal_proximo IS NOT NULL THEN EXCLUDED.ate_terminal_proximo
             ELSE gps_onibus_estado.ate_terminal_proximo
         END,
@@ -365,6 +370,31 @@ BEGIN
         (r.value->>'token')::text
     FROM jsonb_array_elements(p_records) r
     ON CONFLICT (ordem, datahora) DO NOTHING;
+END;
+$$;
+
+-- -----------------------------------------------------------------------------
+-- fn_deactivate_gps_onibus_estado_by_ordens
+-- Marca registros como inativos (ativo=false) na tabela gps_onibus_estado
+-- Recebe JSON array de ordens e atualiza todos em batch
+-- Usado por: rio.js -> deactivateInactiveOnibusEstado
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_deactivate_gps_onibus_estado_by_ordens(p_ordens jsonb)
+RETURNS integer
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    updated_count integer;
+BEGIN
+    UPDATE gps_onibus_estado
+    SET ativo = false, atualizado_em = now()
+    WHERE ordem IN (
+        SELECT jsonb_array_elements_text(p_ordens)
+    )
+    AND ativo = true;
+    
+    GET DIAGNOSTICS updated_count = ROW_COUNT;
+    RETURN updated_count;
 END;
 $$;
 

@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido, saveRioToGpsOnibusEstado } = require('../database/index');
+const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido, saveRioToGpsOnibusEstado, deactivateInactiveOnibusEstado } = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -43,7 +43,7 @@ async function fetchRioGPSData(windowInMinutes = null, options = {}) {
                 console.error('[Rio][sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
             }
         }
-        if (updateInMemoryStore) addPositions(records);
+        if (updateInMemoryStore) await addPositions(records);
         
         if (saveToDb) {
             saveRioRecordsToDb(records)
@@ -61,7 +61,13 @@ async function fetchRioGPSData(windowInMinutes = null, options = {}) {
             saveRioToGpsOnibusEstado(records)
                 .then(() => console.log(`[Rio][gps_onibus_estado] Sucesso: ${records.length} registros`))
                 .catch(err => console.error('[Rio][gps_onibus_estado] Falha:', err.message));
+            deactivateInactiveOnibusEstado()
+                .then(count => {
+                    if (count > 0) console.log(`[Rio][gps_onibus_estado] Desativados ${count} ônibus inativos`);
+                })
+                .catch(err => console.error('[Rio][gps_onibus_estado] Falha ao desativar inativos:', err.message));
         }
+
     } catch (error) {
         const errorMsg = `[Rio] Error fetching data: ${error.message}`;
         console.error(errorMsg);

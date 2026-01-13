@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.gps_onibus_estado
     desde_terminal_proximo timestamp without time zone,
     ate_terminal_proximo timestamp without time zone,
     atualizado_em timestamp without time zone DEFAULT now(),
+    ativo boolean NOT NULL DEFAULT true,
     CONSTRAINT gps_onibus_estado_pkey PRIMARY KEY (ordem)
 )
 

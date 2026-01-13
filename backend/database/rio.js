@@ -1,7 +1,9 @@
 const { dbPool } = require('./pool');
 const { formatDateInTimeZone } = require('../utils');
+const { getRioOnibus } = require('../stores/rioOnibusStore');
 
 const retention_days = Number(process.env.PARTITION_RETENTION_DAYS) || 7;
+const INACTIVITY_THRESHOLD_MINUTES = Number(process.env.INACTIVITY_THRESHOLD_MINUTES) || 15;
 const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
 
 async function enrichRecordsWithSentido(records) {
@@ -200,9 +202,59 @@ async function saveRioToGpsOnibusEstado(records) {
     }
 }
 
+
+async function deactivateInactiveOnibusEstado() {
+    const now = Date.now();
+    const thresholdMs = INACTIVITY_THRESHOLD_MINUTES * 60 * 1000;
+    const inactiveOrdens = new Set();
+
+    const rioOnibus = getRioOnibus();
+
+    for (const linhaKey of Object.keys(rioOnibus)) {
+        const positions = rioOnibus[linhaKey];
+        if (!Array.isArray(positions) || positions.length === 0) continue;
+
+        const pos = positions[0];
+        if (!pos || pos.ordem == null || !pos.datahora) continue;
+
+        let datahoraMs = Number(pos.datahora);
+
+        if (!Number.isFinite(datahoraMs)) {
+            const parsed = Date.parse(pos.datahora);
+            if (!Number.isFinite(parsed)) continue;
+            datahoraMs = parsed;
+        }
+
+        if (now - datahoraMs > thresholdMs) {
+            inactiveOrdens.add(String(pos.ordem));
+        }
+    }
+
+    if (inactiveOrdens.size === 0) {
+        return 0;
+    }
+
+    const result = await dbPool.query(
+        'SELECT fn_deactivate_gps_onibus_estado_by_ordens($1::jsonb)',
+        [JSON.stringify([...inactiveOrdens])]
+    );
+
+    const deactivatedCount =
+        result.rows[0]?.fn_deactivate_gps_onibus_estado_by_ordens || 0;
+
+    if (deactivatedCount > 0) {
+        console.log(
+            `[Rio][gps_onibus_estado] Registros desativados: ${deactivatedCount}`
+        );
+    }
+
+    return deactivatedCount;
+}
+
 module.exports = {
     enrichRecordsWithSentido,
     saveRioRecordsToDb,
     saveRioToGpsSentido,
     saveRioToGpsOnibusEstado,
+    deactivateInactiveOnibusEstado,
 };

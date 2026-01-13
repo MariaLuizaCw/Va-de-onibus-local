@@ -40,12 +40,20 @@ function addPosition(record) {
         ? Number(record.longitude.replace(',', '.'))
         : Number(record.longitude);
 
+    const rawDatahora = record.datahora;
+    let datahoraMs = typeof rawDatahora === 'number' ? rawDatahora : Number(rawDatahora);
+    const newest = bucket.length > 0 ? bucket[0] : null;
+    const newestTs = newest ? Number(newest.datahora) : NaN;
+    if (Number.isFinite(newestTs) && datahoraMs < newestTs) {
+        return;
+    }
+
     const pos = {
         ordem: record.ordem,
         linha: record.linha,
         latitude,
         longitude,
-        datahora: Number(record.datahora),
+        datahora: datahoraMs,
         velocidade: Number(record.velocidade),
         datahoraenvio: Number(record.datahoraenvio),
         datahoraservidor: Number(record.datahoraservidor),
