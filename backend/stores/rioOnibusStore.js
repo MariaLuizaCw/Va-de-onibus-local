@@ -42,11 +42,8 @@ function addPosition(record) {
 
     const rawDatahora = record.datahora;
     let datahoraMs = typeof rawDatahora === 'number' ? rawDatahora : Number(rawDatahora);
-    const newest = bucket.length > 0 ? bucket[0] : null;
-    const newestTs = newest ? Number(newest.datahora) : NaN;
-    if (Number.isFinite(newestTs) && datahoraMs < newestTs) {
-        return;
-    }
+    // Simplificado: latestRecords já são os mais recentes por ordem
+    // Não precisa verificar se é mais novo que o existente
 
     const pos = {
         ordem: record.ordem,

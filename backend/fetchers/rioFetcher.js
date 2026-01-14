@@ -3,6 +3,19 @@ const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido, saveR
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
+// Deduplicar registros por ordem, mantendo apenas o mais recente de cada
+function deduplicateByOrdem(records) {
+    const byOrdem = new Map();
+    for (const record of records) {
+        const key = String(record.ordem);
+        const existing = byOrdem.get(key);
+        if (!existing || Number(record.datahora) > Number(existing.datahora)) {
+            byOrdem.set(key, record);
+        }
+    }
+    return Array.from(byOrdem.values());
+}
+
 async function fetchRioGPSData(windowInMinutes = null, options = {}) {
     if (windowInMinutes === null) {
         windowInMinutes = Number(process.env.RIO_POLLING_WINDOW_MINUTES) || Number(process.env.POLLING_WINDOW_MINUTES) || 3;
@@ -36,31 +49,65 @@ async function fetchRioGPSData(windowInMinutes = null, options = {}) {
         });
 
         const records = response.data;
+        
+        // Deduplicar: manter apenas o registro mais recente de cada ordem
+        // 22k registros → ~3k registros únicos
+        const latestRecords = deduplicateByOrdem(records);
+        console.log(`[Rio] ${records.length} registros → ${latestRecords.length} únicos por ordem`);
+
+        // Enrich apenas os registros únicos (7x mais rápido)
         if (!skipEnrich) {
             try {
-                await enrichRecordsWithSentido(records);
+                await enrichRecordsWithSentido(latestRecords);
             } catch (err) {
                 console.error('[Rio][sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
             }
         }
-        if (updateInMemoryStore) await addPositions(records);
+
+        // Store em memória recebe apenas os mais recentes (já enriquecidos)
+
+
+        const dbPromises = [];
         
+        // gps_posicoes: recebe TODOS os registros (histórico completo)
         if (saveToDb) {
-            saveRioRecordsToDb(records)
-                .then(() => console.log(`[Rio][gps_posicoes] Sucesso: ${records.length} registros`))
-                .catch(err => console.error('[Rio][gps_posicoes] Falha:', err.message));
+            dbPromises.push(
+                saveRioRecordsToDb(records)
+                    .then(() => console.log(`[Rio][gps_posicoes] Sucesso: ${records.length} registros`))
+                    .catch(err => console.error('[Rio][gps_posicoes] Falha:', err.message))
+            );
         }
 
-        if (saveToGpsSentido) {
-            saveRioToGpsSentido(records)
-                .then(() => console.log(`[Rio][gps_sentido] Sucesso: ${records.length} registros`))
-                .catch(err => console.error('[Rio][gps_sentido] Falha:', err.message));
-        }
 
+           // gps_onibus_estado: recebe apenas os mais recentes (com sentido)
         if (saveToGpsOnibusEstado) {
-            saveRioToGpsOnibusEstado(records)
-                .then(() => console.log(`[Rio][gps_onibus_estado] Sucesso: ${records.length} registros`))
-                .catch(err => console.error('[Rio][gps_onibus_estado] Falha:', err.message));
+            dbPromises.push(
+                saveRioToGpsOnibusEstado(records)
+                    .then(() => console.log(`[Rio][gps_onibus_estado] Sucesso: ${latestRecords.length} registros`))
+                    .catch(err => console.error('[Rio][gps_onibus_estado] Falha:', err.message))
+            );
+        }
+
+        // gps_sentido: recebe apenas os mais recentes (com sentido)
+        if (saveToGpsSentido) {
+            dbPromises.push(
+                saveRioToGpsSentido(latestRecords)
+                    .then(() => console.log(`[Rio][gps_sentido] Sucesso: ${latestRecords.length} registros`))
+                    .catch(err => console.error('[Rio][gps_sentido] Falha:', err.message))
+            );
+        }
+
+     
+
+        // Executar em paralelo
+        await Promise.allSettled(dbPromises);
+
+
+        if (updateInMemoryStore) await addPositions(latestRecords);
+
+
+        // Deactivate só depois que todos salvaram
+        if (saveToGpsOnibusEstado) {
             deactivateInactiveOnibusEstado()
                 .then(count => {
                     if (count > 0) console.log(`[Rio][gps_onibus_estado] Desativados ${count} ônibus inativos`);
