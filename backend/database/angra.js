@@ -180,7 +180,7 @@ async function saveAngraToGpsSentido(records) {
 
         try {
             await dbPool.query(
-                'SELECT fn_insert_gps_sentido_angra_batch_json($1::jsonb)',
+                'SELECT fn_upsert_gps_sentido_angra_batch_json($1::jsonb)',
                 [JSON.stringify(recordsJson)]
             );
         } catch (err) {

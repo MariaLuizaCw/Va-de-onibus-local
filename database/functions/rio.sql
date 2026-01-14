@@ -335,16 +335,46 @@ END;
 $$;
 
 -- -----------------------------------------------------------------------------
--- fn_insert_gps_sentido_rio_batch_json
--- Insere registros GPS com sentido do Rio em batch
+-- fn_upsert_gps_sentido_rio_batch_json
+-- Upsert registros GPS com sentido do Rio em batch
 -- Recebe JSON array e usa jsonb_array_elements para processar
+-- Atualiza apenas se o novo registro for mais recente que o existente
 -- Usado por: rio.js -> saveRioToGpsSentido (batch)
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_insert_gps_sentido_rio_batch_json(p_records jsonb)
+CREATE OR REPLACE FUNCTION fn_upsert_gps_sentido_rio_batch_json(p_records jsonb)
 RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    WITH input_rows AS (
+        SELECT
+            (r.value->>'ordem')::text AS ordem,
+            (r.value->>'datahora')::timestamp AS datahora,
+            (r.value->>'linha')::text AS linha,
+            (r.value->>'latitude')::double precision AS latitude,
+            (r.value->>'longitude')::double precision AS longitude,
+            (r.value->>'velocidade')::double precision AS velocidade,
+            (r.value->>'sentido')::text AS sentido,
+            (r.value->>'sentido_itinerario_id')::integer AS sentido_itinerario_id,
+            (r.value->>'route_name')::text AS route_name,
+            (r.value->>'token')::text AS token
+        FROM jsonb_array_elements(p_records) r
+    ),
+    dedup AS (
+        SELECT DISTINCT ON (ordem)
+            ordem,
+            datahora,
+            linha,
+            latitude,
+            longitude,
+            velocidade,
+            sentido,
+            sentido_itinerario_id,
+            route_name,
+            token
+        FROM input_rows
+        ORDER BY ordem, datahora DESC NULLS LAST
+    )
     INSERT INTO gps_sentido (
         ordem,
         datahora,
@@ -358,18 +388,29 @@ BEGIN
         token
     )
     SELECT
-        (r.value->>'ordem')::text,
-        (r.value->>'datahora')::timestamp,
-        (r.value->>'linha')::text,
-        (r.value->>'latitude')::double precision,
-        (r.value->>'longitude')::double precision,
-        (r.value->>'velocidade')::double precision,
-        (r.value->>'sentido')::text,
-        (r.value->>'sentido_itinerario_id')::integer,
-        (r.value->>'route_name')::text,
-        (r.value->>'token')::text
-    FROM jsonb_array_elements(p_records) r
-    ON CONFLICT (ordem, datahora) DO NOTHING;
+        d.ordem,
+        d.datahora,
+        d.linha,
+        d.latitude,
+        d.longitude,
+        d.velocidade,
+        d.sentido,
+        d.sentido_itinerario_id,
+        d.route_name,
+        d.token
+    FROM dedup d
+    ON CONFLICT (ordem) DO UPDATE SET
+        datahora = EXCLUDED.datahora,
+        linha = EXCLUDED.linha,
+        latitude = EXCLUDED.latitude,
+        longitude = EXCLUDED.longitude,
+        velocidade = EXCLUDED.velocidade,
+        sentido = EXCLUDED.sentido,
+        sentido_itinerario_id = EXCLUDED.sentido_itinerario_id,
+        route_name = EXCLUDED.route_name,
+        token = EXCLUDED.token
+    WHERE gps_sentido.datahora IS NULL 
+       OR EXCLUDED.datahora > gps_sentido.datahora;
 END;
 $$;
 

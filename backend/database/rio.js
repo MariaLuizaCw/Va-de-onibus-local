@@ -104,20 +104,8 @@ async function saveRioToGpsSentido(records) {
     if (!records || records.length === 0) return;
     const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
 
-    const now = new Date();
-    const minDate = new Date(now.getTime() - retention_days * 24 * 60 * 60 * 1000);
-
-    const filteredRecords = records.filter((record) => {
-        const datahoraMs = Number(record.datahora);
-        if (!Number.isFinite(datahoraMs)) return false;
-        const dt = new Date(datahoraMs);
-        if (isNaN(dt.getTime())) return false;
-        return dt >= minDate && dt <= now;
-    });
-
-
-    for (let i = 0; i < filteredRecords.length; i += BATCH_SIZE) {
-        const batch = filteredRecords.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
 
         const recordsJson = batch.map(record => {
             const lat = typeof record.latitude === 'string'
@@ -148,11 +136,11 @@ async function saveRioToGpsSentido(records) {
 
         try {
             await dbPool.query(
-                'SELECT fn_insert_gps_sentido_rio_batch_json($1::jsonb)',
+                'SELECT fn_upsert_gps_sentido_rio_batch_json($1::jsonb)',
                 [JSON.stringify(recordsJson)]
             );
         } catch (err) {
-            console.error('[Rio][gps_sentido] Error inserting records:', err.message);
+            console.error('[Rio][gps_sentido] Error upserting records:', err.message);
         }
     }
 }
