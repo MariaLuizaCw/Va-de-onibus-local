@@ -97,6 +97,16 @@ async function saveRioRecordsToDb(records) {
         } catch (err) {
             console.error('[Rio] Error inserting GPS records into database:', err);
         }
+
+
+        try {
+            await dbPool.query(
+                'select * from gps.ftdbgps_atualiza_gps_sentido()',
+                [JSON.stringify(recordsJson)]
+            );
+        } catch (err) {
+            console.error('[Rio] Erro executing atualiza_gps_sentido query', err);
+        }
     }
 }
 

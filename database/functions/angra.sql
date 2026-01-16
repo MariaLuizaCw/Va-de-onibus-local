@@ -126,6 +126,20 @@ BEGIN
 END;
 $$;
 
+-- -----------------------------------------------------------------------------
+-- ftdbgps_atualiza_gps_sentido
+-- Função vazia que retorna 'OK'
+-- Usado para testes/chamadas de API
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION gps.ftdbgps_atualiza_gps_sentido()
+RETURNS text
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN 'OK';
+END;
+$$;
+
 -- =============================================================================
 -- FIM DO SCRIPT
 -- =============================================================================

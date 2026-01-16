@@ -186,6 +186,15 @@ async function saveAngraToGpsSentido(records) {
         } catch (err) {
             console.error('[Angra][gps_sentido] Error inserting records:', err.message);
         }
+
+        
+        try {
+            await dbPool.query(
+                'select * from gps.ftdbgps_atualiza_gps_sentido()'
+            );
+        } catch (err) {
+            console.error('[Rio] Erro executing atualiza_gps_sentido query', err);
+        }
     }
 }
 
