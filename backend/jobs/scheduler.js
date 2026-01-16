@@ -13,7 +13,7 @@ const handlers = {
     generateSentidoCoverageReport,
     generateAngraRouteTypeReport,
     fetchRioGPSData: (data = {}) => fetchRioGPSData(null, data),
-    fetchAngraGPSData: (data = {}) => fetchAngraGPSData(null, data),
+    fetchAngraGPSData: (data = {}) => fetchAngraGPSData(data),
     fetchCircularLines,
     saveRioOnibusSnapshot: () => saveRioOnibusSnapshot(getRioOnibus()),
     saveAngraOnibusSnapshot: () => saveAngraOnibusSnapshot(getAngraOnibus())

@@ -1,31 +1,51 @@
-# Va-de-onibus Backend
 
-## Environment Variables
+## Deploy em Produção
 
-The backend relies on the following environment variables. Defaults are applied when noted:
+### 1. Preparação do Ambiente
 
-| Variable | Description | Default |
-| --- | --- | --- |
-| `DATABASE_HOST` | PostgreSQL host address | required |
-| `DATABASE_PORT` | PostgreSQL port | `5432` if unset |
-| `DATABASE_NAME` | Database name | required |
-| `DATABASE_USER` | Database user | required |
-| `DATABASE_PASSWORD` | Database password | required |
-| `BACKEND_PORT` | Port that the backend server listens on | `3001` |
-| `API_TIMEZONE` | Time zone used when creating reports and partitions | `America/Sao_Paulo` |
-| `PARTITION_RETENTION_DAYS` | How many days of partitions to keep | `7` |
-| `PARTITION_CHECK_INTERVAL_MS` | Frequency of automatic partition creation and deletion| `86400000` (24h) |
-| `RIO_POLLING_INTERVAL_MS` | How often Rio GPS data is polled | `60000` |
-| `RIO_POLLING_WINDOW_MINUTES` | Lookback window for Rio catchup requests in minutes | `3` |
-| `CATCHUP_HOURS` | Hours of historical Rio data to fetch at startup | `1` |
-| `ANGRA_POLLING_INTERVAL_MS` | Interval to poll the Angra SSX API | `60000` |
-| `ANGRA_CIRCULAR_LINES_POLL_MS` | How often cached Angra circular lines are refreshed | `86400000` |
-| `ANGRA_SSX_USERNAME` | Angra SSX API username | required |
-| `ANGRA_SSX_PASSWORD` | Angra SSX API password | required |
-| `ANGRA_SSX_CLIENT_CODE` | Angra SSX client integration code | required |
-| `ANGRA_SSX_TOKEN_REFRESH_MS` | Force token refresh interval | `18000000` (5h) |
-| `SNAPSHOT_INTERVAL_MS` | Interval to persist in-memory snapshots for Rio/Angra | `900000` |
-| `COVERAGE_REPORT_INTERVAL_MS` | How often the coverage reports run | `86400000` |
-| `MAX_SNAP_DISTANCE_METERS` | Maximum distance (meters) to match GPS points to itineraries | `300` |
-| `SENTIDO_BATCH_SIZE` | Batch size used when enriching Rio records with sentido data | `2000` |
-| `DB_BATCH_SIZE` | Batch size when inserting Rio/Angra GPS records | `2000` |
+```bash
+# Clone o repositório
+git clone <URL_DO_REPOSITORIO>
+cd Va-de-onibus-local
+
+# Copie o arquivo .env fornecido para o ambiente de produção
+# O arquivo .env já deve conter todas as variáveis configuradas
+# Se necessário, ajuste as variáveis específicas do seu ambiente
+```
+
+### 2. Configuração das Variáveis de Ambiente
+
+O arquivo `.env` fornecido já contém as configurações principais. Verifique e ajuste se necessário e correlacione com o docker-compose.yml. Observe principalmente as portas em que os serviços serão levantados e as credenciais do banco de dados fornecidadas para o serviço do backend. 
+
+
+### 3. Importação das Functions do Banco
+
+O backend depende de functions PostgreSQL. Importe manualmente os arquivos essenciais:
+
+**Functions essenciais para os jobs de Angra:**
+- `database/functions/angra.sql`
+- `database/functions/itinerarioStore.sql`
+
+**Para importar todas as functions:**
+```bash
+./scripts/apply-functions.sh
+```
+
+### 4. Execução dos Serviços
+
+**Apenas o backend:**
+```bash
+docker compose up --build backend
+```
+
+**Apenas o frontend:**
+```bash
+docker compose up --build frontend
+```
+
+
+### 5. Configuração do Frontend
+
+O frontend precisa receber a URL do backend via variável de ambiente:
+- `PUBLIC_BACKEND_URL`: URL completa do backend (ex: `https://seu-dominio.com/api`)
+

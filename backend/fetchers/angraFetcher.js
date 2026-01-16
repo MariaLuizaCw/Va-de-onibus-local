@@ -116,10 +116,7 @@ async function fetchCircularLines() {
     }
 }
 
-async function fetchAngraGPSData(windowInMinutes = null, options = {}) {
-    if (windowInMinutes === null) {
-        windowInMinutes = Number(process.env.ANGRA_POLLING_WINDOW_MINUTES) || Number(process.env.POLLING_WINDOW_MINUTES) || 3;
-    }
+async function fetchAngraGPSData(options = {}) {
     const { 
         updateInMemoryStore = true,
         saveToDb = true,
