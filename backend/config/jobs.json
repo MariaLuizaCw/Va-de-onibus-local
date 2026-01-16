@@ -7,62 +7,15 @@
       "description": "Atualiza cache do itinerário a cada 6 horas"
     },
     {
-      "name": "partition-check",
-      "handler": "ensureFuturePartitions",
-      "cron": "0 3 * * *",
-      "description": "Verifica e cria partições futuras diariamente às 3h"
-    },
-    {
-      "name": "sentido-coverage-report",
-      "handler": "generateSentidoCoverageReport",
-      "cron": "0 4 * * *",
-      "description": "Gera relatório de cobertura de sentido diariamente às 4h"
-    },
-    {
-      "name": "angra-route-type-report",
-      "handler": "generateAngraRouteTypeReport",
-      "cron": "0 4 * * *",
-      "description": "Gera relatório de route_type de Angra diariamente às 4h"
-    },
-    {
-      "name": "rio-snapshot",
-      "handler": "saveRioOnibusSnapshot",
-      "cron": "*/15 * * * *",
-      "description": "Salva snapshot do Rio a cada 15 minutos"
-    },
-    {
-      "name": "angra-snapshot",
-      "handler": "saveAngraOnibusSnapshot",
-      "cron": "*/15 * * * *",
-      "description": "Salva snapshot de Angra a cada 15 minutos"
-    },
-    {
-      "name": "rio-gps-fetch",
-      "handler": "fetchRioGPSData",
-      "cron": "* * * * *",
-      "description": "Busca dados GPS do Rio a cada minuto",
-      "options": {
-        "saveToDb": true,
-        "saveToGpsSentido": true,
-        "saveToGpsOnibusEstado": true
-      }
-    },
-    {
       "name": "angra-gps-fetch",
       "handler": "fetchAngraGPSData",
       "cron": "* * * * *",
       "description": "Busca dados GPS de Angra a cada minuto",
       "options": {
-        "saveToDb": true,
+        "saveToDb": false,
         "saveToGpsSentido": true,
-        "saveToGpsOnibusEstado": true
+        "saveToGpsOnibusEstado": false
       }
-    },
-    {
-      "name": "angra-circular-lines",
-      "handler": "fetchCircularLines",
-      "cron": "0 2 * * *",
-      "description": "Atualiza definições de linhas circulares de Angra diariamente às 2h"
     }
   ]
 }
