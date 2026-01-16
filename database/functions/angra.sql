@@ -112,7 +112,7 @@ BEGIN
         (r.value->>'route_name')::text,
         (r.value->>'token')::text
     FROM jsonb_array_elements(p_records) r
-    ON CONFLICT (ordem) DO UPDATE SET
+    ON CONFLICT (token, ordem) DO UPDATE SET
         datahora = EXCLUDED.datahora,
         linha = EXCLUDED.linha,
         latitude = EXCLUDED.latitude,
@@ -120,8 +120,7 @@ BEGIN
         velocidade = EXCLUDED.velocidade,
         sentido = EXCLUDED.sentido,
         sentido_itinerario_id = EXCLUDED.sentido_itinerario_id,
-        route_name = EXCLUDED.route_name,
-        token = EXCLUDED.token
+        route_name = EXCLUDED.route_name
     WHERE gps_sentido.datahora IS NULL 
        OR EXCLUDED.datahora > gps_sentido.datahora;
 END;
