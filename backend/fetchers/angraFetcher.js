@@ -4,6 +4,22 @@ const { addPositions } = require('../stores/angraOnibusStore');
 
 const SSX_BASE_URL = 'https://integration.systemsatx.com.br';
 
+// Deduplicar registros por VehicleId, mantendo apenas o mais recente de cada
+function deduplicateByVehicleId(records) {
+    const byVehicle = new Map();
+    for (const record of records) {
+        const key = String(record.VehicleIntegrationCode);
+        const existing = byVehicle.get(key);
+        // Comparar por PositionDateTime (ISO string ou timestamp)
+        const currentTime = new Date(record.PositionDateTime).getTime();
+        const existingTime = existing ? new Date(existing.PositionDateTime).getTime() : 0;
+        if (!existing || currentTime > existingTime) {
+            byVehicle.set(key, record);
+        }
+    }
+    return Array.from(byVehicle.values());
+}
+
 let cachedToken = null;
 let tokenExpiresAt = null;
 let circularLinesCache = new Set();
@@ -145,7 +161,11 @@ async function fetchAngraGPSData(options = {}) {
             return;
         }
 
-        const enhancedRecords = records.map(record => ({
+        // Deduplicar: manter apenas o registro mais recente de cada VehicleId
+        const latestRecords = deduplicateByVehicleId(records);
+        console.log(`[Angra] ${records.length} registros → ${latestRecords.length} únicos por VehicleId`);
+
+        const enhancedRecords = latestRecords.map(record => ({
             ...record,
             RouteType: getRouteType(record),
         }));
