@@ -133,13 +133,13 @@ const CATCHUP_HOURS = Number(process.env.CATCHUP_HOURS) || 1;
 
 async function runInitialTasks() {
     console.log('[bootstrap] Carregando snapshots...');
-    await loadLatestRioOnibusSnapshot()
-        .then(snapshot => { if (snapshot) replaceRioOnibusSnapshot(snapshot); })
-        .catch(err => console.error('[snapshot][rio] failed to load', err));
+    // await loadLatestRioOnibusSnapshot()
+    //     .then(snapshot => { if (snapshot) replaceRioOnibusSnapshot(snapshot); })
+    //     .catch(err => console.error('[snapshot][rio] failed to load', err));
 
-    await loadLatestAngraOnibusSnapshot()
-        .then(snapshot => { if (snapshot) replaceAngraOnibusSnapshot(snapshot); })
-        .catch(err => console.error('[snapshot][angra] failed to load', err));
+    // await loadLatestAngraOnibusSnapshot()
+    //     .then(snapshot => { if (snapshot) replaceAngraOnibusSnapshot(snapshot); })
+    //     .catch(err => console.error('[snapshot][angra] failed to load', err));
 
     console.log('[bootstrap] Carregando itinerário...');
     await loadItinerarioIntoMemory().catch(err => {

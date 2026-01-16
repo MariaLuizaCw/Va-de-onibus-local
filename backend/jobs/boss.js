@@ -1,6 +1,6 @@
 const { PgBoss } = require('pg-boss');
 
-const connectionString = `postgresql://${process.env.DATABASE_USER}:${process.env.DATABASE_PASSWORD}@${process.env.DATABASE_HOST}:${process.env.DATABASE_PORT || 5432}/${process.env.DATABASE_NAME}`;
+const connectionString = `postgresql://${process.env.PGBOSS_USER}:${process.env.PGBOSS_PASSWORD}@${process.env.PGBOSS_HOST}:${process.env.PGBOSS_PORT || 5432}/${process.env.PGBOSS_DATABASE}`;
 
 const boss = new PgBoss(connectionString);
 
