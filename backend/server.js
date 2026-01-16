@@ -150,8 +150,8 @@ async function runInitialTasks() {
     console.log('[bootstrap] Carregando linhas circulares de Angra...');
     await fetchCircularLines().catch(err => console.error('[Angra] Initial circular lines fetch failed', err));
 
-    console.log('[bootstrap] Executando verificação inicial de partições...');
-    await ensureFuturePartitions();
+    // console.log('[bootstrap] Executando verificação inicial de partições...');
+    // await ensureFuturePartitions();
 }
 
 async function bootstrap() {
