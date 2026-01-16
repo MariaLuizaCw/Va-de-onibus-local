@@ -27,9 +27,26 @@ O backend depende de functions PostgreSQL. Importe manualmente os arquivos essen
 - `database/functions/itinerarioStore.sql`
 
 **Para importar todas as functions:**
+
+O script `apply-functions.sh` suporta dois modos de execução:
+
+**Modo Container (padrão):**
 ```bash
+./scripts/apply-functions.sh container
+# ou simplesmente
 ./scripts/apply-functions.sh
 ```
+Executa as functions via `docker exec` no container Postgres local.
+
+**Modo Remoto:**
+```bash
+./scripts/apply-functions.sh remote
+```
+Conecta diretamente a um banco PostgreSQL em outra máquina na rede.
+
+**Variáveis necessárias no .env:**
+- **Modo container**: `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- **Modo remote**: `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`
 
 ### 4. Execução dos Serviços
 
