@@ -146,24 +146,10 @@ async function saveAngraToGpsSentido(records) {
     if (!records || records.length === 0) return;
     const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
 
-    // Filtra registros que estão dentro do período de retenção (partições existentes)
-    const now = new Date(new Date().toLocaleString('en-US', { timeZone: API_TIMEZONE }));
-    const minDate = new Date(now.getTime() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
-    const filteredRecords = records.filter(record => {
-        const EventDate = new Date(record.EventDate);
-        return EventDate >= minDate && EventDate <= now;
-    });
+    console.log(`[Angra][gps_sentido] Processing ${records.length} records`);
 
-    const skippedCount = records.length - filteredRecords.length;
-    if (filteredRecords.length === 0) {
-        return;
-    }
-
-    if (skippedCount > 0) {
-    }
-
-    for (let i = 0; i < filteredRecords.length; i += BATCH_SIZE) {
-        const batch = filteredRecords.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
 
         const recordsJson = batch.map(record => ({
             ordem: record.VehicleIntegrationCode,
@@ -177,12 +163,13 @@ async function saveAngraToGpsSentido(records) {
             route_name: record.route_name || null,
             token: 'Bonfim'
         }));
-
+        console.log(recordsJson.length)
         try {
             await dbPool.query(
                 'SELECT fn_upsert_gps_sentido_angra_batch_json($1::jsonb)',
                 [JSON.stringify(recordsJson)]
             );
+            console.log(`[Angra][gps_sentido] Successfully processed batch of ${recordsJson.length} records`);
         } catch (err) {
             console.error('[Angra][gps_sentido] Error inserting records:', err.message);
         }
