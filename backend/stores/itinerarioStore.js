@@ -3,7 +3,7 @@ let dbPool = null;
 
 function getDbPool() {
     if (!dbPool) {
-        dbPool = require('./database').dbPool;
+        dbPool = require('../database').dbPool;
     }
     return dbPool;
 }

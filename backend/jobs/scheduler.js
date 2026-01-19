@@ -28,7 +28,7 @@ function formatDuration(ms) {
     return `${(ms / 60000).toFixed(2)}min`;
 }
 
-async function executeJob(jobName, cronExpression, handlerFn, options = {}, subtask = false) {
+async function executeJob(jobName, cronExpression, handlerFn, options = {}, subtask = false, parentJob = null) {
     const startedAt = new Date();
     const startTime = Date.now();
     
@@ -53,6 +53,7 @@ async function executeJob(jobName, cronExpression, handlerFn, options = {}, subt
     
     await logJobExecution({
         jobName,
+        parentJob,
         subtask,
         cronExpression,
         startedAt,
@@ -78,7 +79,7 @@ function scheduleJobs() {
         }
 
         const task = cron.schedule(cronExpression, () => {
-            executeJob(name, cronExpression, handlers[handler], options, false);
+            executeJob(name, cronExpression, handlers[handler], options);
         }, {
             scheduled: true,
             timezone: 'America/Sao_Paulo'

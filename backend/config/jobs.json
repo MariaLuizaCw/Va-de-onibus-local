@@ -27,7 +27,8 @@
       "name": "cleanup-job-logs",
       "handler": "deleteOldJobExecutions",
       "cron": "0 3 * * *",
-      "description": "Remove logs de jobs com mais de 3 meses diariamente às 3h"
+      "description": "Remove logs de jobs com mais de 3 meses diariamente às 3h",
+      "runOnStartup": true
     }
   ]
 }

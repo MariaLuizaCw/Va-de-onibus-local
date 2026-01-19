@@ -1,6 +1,7 @@
 const { dbPool } = require('./pool');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { getItinerariosByLinha, isLoaded } = require('../stores/itinerarioStore');
+const { logJobExecution } = require('./jobLogs');
 
 // Normaliza string para comparação (lowercase, trim, remove acentos)
 function normalizeString(str) {
@@ -28,6 +29,8 @@ function tokenOverlapRatio(tokensA, tokensB) {
 }
 
 async function enrichAngraRecordsWithSentido(records) {
+    const enrichStartedAt = new Date();
+    
     if (!Array.isArray(records) || records.length === 0) return records;
 
     if (!isLoaded()) {
@@ -37,6 +40,20 @@ async function enrichAngraRecordsWithSentido(records) {
             record.sentido_itinerario_id = null;
             record.route_name = null;
         }
+        
+        // Log mesmo quando não processa
+        const enrichFinishedAt = new Date();
+        await logJobExecution({
+            jobName: 'angra-enrich-sentido',
+            parentJob: 'angra-gps-fetch',
+            subtask: true,
+            startedAt: enrichStartedAt,
+            finishedAt: enrichFinishedAt,
+            durationMs: enrichFinishedAt - enrichStartedAt,
+            status: 'success',
+            infoMessage: 'Cache não carregado, 0 registros enriquecidos'
+        });
+        
         return records;
     }
 
@@ -71,15 +88,30 @@ async function enrichAngraRecordsWithSentido(records) {
         }
     }
 
+    // Log do enriquecimento
+    const enrichFinishedAt = new Date();
+    await logJobExecution({
+        jobName: 'angra-enrich-sentido',
+        parentJob: 'angra-gps-fetch',
+        subtask: true,
+        startedAt: enrichStartedAt,
+        finishedAt: enrichFinishedAt,
+        durationMs: enrichFinishedAt - enrichStartedAt,
+        status: 'success',
+        infoMessage: `${records.length} registros enriquecidos`
+    });
+
     return records;
 }
 
 async function saveAngraToGpsSentido(records) {
     if (!records || records.length === 0) return;
+    
+    const startedAt = new Date();
     const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
+    let totalProcessed = 0;
 
-    console.log(`[Angra][gps_sentido] Processing ${records.length} records`);
-
+    
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE);
 
@@ -95,13 +127,13 @@ async function saveAngraToGpsSentido(records) {
             route_name: record.route_name || null,
             token: 'Bonfim'
         }));
-        console.log(recordsJson.length)
+        
         try {
             await dbPool.query(
                 'SELECT fn_upsert_gps_sentido_angra_batch_json($1::jsonb)',
                 [JSON.stringify(recordsJson)]
             );
-            console.log(`[Angra][gps_sentido] Successfully processed batch of ${recordsJson.length} records`);
+                        totalProcessed += batch.length;
         } catch (err) {
             console.error('[Angra][gps_sentido] Error inserting records:', err.message);
         }
@@ -115,6 +147,21 @@ async function saveAngraToGpsSentido(records) {
             console.error('[Rio] Erro executing atualiza_gps_sentido query', err);
         }
     }
+
+    // Log da subtask
+    const finishedAt = new Date();
+    const durationMs = finishedAt - startedAt;
+    
+    await logJobExecution({
+        jobName: 'saveAngraToGpsSentido',
+        parentJob: 'angra-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs,
+        status: 'success',
+        infoMessage: `${totalProcessed} registros processados`
+    });
 }
 
 module.exports = {

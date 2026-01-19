@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('../database/index');
 const { addPositions } = require('../stores/angraOnibusStore');
+const { logJobExecution } = require('../database/jobLogs');
 
 const SSX_BASE_URL = 'https://integration.systemsatx.com.br';
 
@@ -68,6 +69,59 @@ async function login() {
     }
 }
 
+async function getTokenLogged() {
+    const tokenStartedAt = new Date();
+    const token = await getToken();
+    const tokenFinishedAt = new Date();
+
+    // Log da subtask de obtenção de token
+    await logJobExecution({
+        jobName: 'angra-get-token',
+        parentJob: 'angra-gps-fetch',
+        subtask: true,
+        startedAt: tokenStartedAt,
+        finishedAt: tokenFinishedAt,
+        durationMs: tokenFinishedAt - tokenStartedAt,
+        status: 'success',
+        infoMessage: cachedToken && tokenExpiresAt && Date.now() < tokenExpiresAt ? 'Token cacheado' : 'Novo token'
+    });
+
+    return token;
+}
+
+async function apiRequestLogged(token) {
+    const apiStartedAt = new Date();
+    
+    const response = await axios.post(
+        `${SSX_BASE_URL}/GlobalBus/LastPosition/List`,
+        [],  // Empty array as body
+        {
+            headers: {
+                'accept': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            }
+        }
+    );
+    
+    const apiFinishedAt = new Date();
+    const records = response.data;
+
+    // Log da subtask de requisição API
+    await logJobExecution({
+        jobName: 'angra-api-request',
+        parentJob: 'angra-gps-fetch',
+        subtask: true,
+        startedAt: apiStartedAt,
+        finishedAt: apiFinishedAt,
+        durationMs: apiFinishedAt - apiStartedAt,
+        status: 'success',
+        infoMessage: `${records.length} registros recebidos`
+    });
+
+    return response;
+}
+
 async function getToken() {
     // Return cached token if still valid
     if (cachedToken && tokenExpiresAt && Date.now() < tokenExpiresAt) {
@@ -76,29 +130,6 @@ async function getToken() {
 
     // Otherwise, login again
     return await login();
-}
-
-function getRouteType(record) {
-    if (!record) return 'indefinido';
-
-    if (record.IsGarage === true || String(record.IsGarage).toLowerCase() === 'true') {
-        return 'garagem';
-    }
-
-    if (circularLinesCache.has(String(record.LineNumber))) {
-        return 'circular';
-    }
-
-
-    if (record.RouteDirection === 1) {
-        return 'ida';
-    }
-
-    if (record.RouteDirection === 2) {
-        return 'volta';
-    }
-
-    return 'indefinido';
 }
 
 async function fetchCircularLines() {
@@ -135,26 +166,12 @@ async function fetchCircularLines() {
 async function fetchAngraGPSData(options = {}) {
     const { 
         updateInMemoryStore = true,
-        saveToDb = true,
-        saveToGpsSentido = true,
-        saveToGpsOnibusEstado = true
+        saveToGpsSentido = true
     } = options;
 
     try {
-        const token = await getToken();
-
-        const response = await axios.post(
-            `${SSX_BASE_URL}/GlobalBus/LastPosition/List`,
-            [],  // Empty array as body
-            {
-                headers: {
-                    'accept': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                }
-            }
-        );
-
+        const token = await getTokenLogged();
+        const response = await apiRequestLogged(token);
         const records = response.data;
 
         if (!Array.isArray(records)) {
@@ -163,28 +180,21 @@ async function fetchAngraGPSData(options = {}) {
 
         // Deduplicar: manter apenas o registro mais recente de cada VehicleId
         const latestRecords = deduplicateByVehicleId(records);
-        console.log(`[Angra] ${records.length} registros → ${latestRecords.length} únicos por VehicleId`);
-
-        const enhancedRecords = latestRecords.map(record => ({
-            ...record,
-            RouteType: getRouteType(record),
-        }));
 
         // Enriquecer com dados da tabela itinerario
         try {
-            await enrichAngraRecordsWithSentido(enhancedRecords);
+            await enrichAngraRecordsWithSentido(latestRecords);
         } catch (err) {
             console.error('[Angra][sentido] enrichAngraRecordsWithSentido failed; continuing without sentido', err.message);
         }
 
         if (updateInMemoryStore) {
-            addPositions(enhancedRecords);
+            addPositions(latestRecords);
         }
 
-        
         if (saveToGpsSentido) {
-            saveAngraToGpsSentido(enhancedRecords)
-                .then(() => console.log(`[Angra][gps_sentido] Sucesso: ${enhancedRecords.length} registros`))
+            saveAngraToGpsSentido(latestRecords)
+                .then(() => console.log(`[Angra][gps_sentido] Sucesso: ${latestRecords.length} registros`))
                 .catch(err => console.error('[Angra][gps_sentido] Falha:', err.message));
         }
 

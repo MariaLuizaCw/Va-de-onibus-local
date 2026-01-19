@@ -27,16 +27,3 @@ CREATE TABLE IF NOT EXISTS public.itinerario
     brs text COLLATE pg_catalog."default",
     funcao text COLLATE pg_catalog."default"
 )
-
-TABLESPACE pg_default;
-
-ALTER TABLE IF EXISTS public.itinerario
-    OWNER to postgres;
-
-GRANT ALL ON TABLE public.itinerario TO anon;
-
-GRANT ALL ON TABLE public.itinerario TO authenticated;
-
-GRANT ALL ON TABLE public.itinerario TO postgres;
-
-GRANT ALL ON TABLE public.itinerario TO service_role;

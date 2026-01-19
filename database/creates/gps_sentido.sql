@@ -16,16 +16,5 @@ CREATE TABLE IF NOT EXISTS public.gps_sentido
     sentido_itinerario_id integer,
     route_name text COLLATE pg_catalog."default",
     token text COLLATE pg_catalog."default",
-    CONSTRAINT gps_sentido_pkey PRIMARY KEY (ordem)
+    CONSTRAINT gps_sentido_pkey PRIMARY KEY (ordem, token)
 );
-
-ALTER TABLE IF EXISTS public.gps_sentido
-    OWNER to postgres;
-
-GRANT ALL ON TABLE public.gps_sentido TO anon;
-
-GRANT ALL ON TABLE public.gps_sentido TO authenticated;
-
-GRANT ALL ON TABLE public.gps_sentido TO postgres;
-
-GRANT ALL ON TABLE public.gps_sentido TO service_role;

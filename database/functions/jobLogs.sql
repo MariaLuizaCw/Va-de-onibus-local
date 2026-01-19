@@ -10,13 +10,15 @@
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_insert_job_execution(
     p_job_name TEXT,
+    p_parent_job TEXT,
     p_subtask BOOLEAN,
     p_cron_expression TEXT,
     p_started_at TIMESTAMPTZ,
     p_finished_at TIMESTAMPTZ,
     p_duration_ms INTEGER,
     p_status TEXT,
-    p_error_message TEXT
+    p_error_message TEXT,
+    p_info_message TEXT DEFAULT NULL
 )
 RETURNS void
 LANGUAGE plpgsql
@@ -24,23 +26,27 @@ AS $$
 BEGIN
     INSERT INTO job_executions (
         job_name,
+        parent_job,
         subtask,
         cron_expression,
         started_at,
         finished_at,
         duration_ms,
         status,
-        error_message
+        error_message,
+        info_message
     )
     VALUES (
         p_job_name,
+        p_parent_job,
         COALESCE(p_subtask, FALSE),
         p_cron_expression,
         p_started_at,
         p_finished_at,
         p_duration_ms,
         p_status,
-        LEFT(p_error_message, 500)
+        LEFT(p_error_message, 500),
+        LEFT(p_info_message, 500)
     );
 END;
 $$;

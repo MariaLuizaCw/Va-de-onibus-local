@@ -1,6 +1,7 @@
 const { dbPool } = require('./pool');
 const { formatDateInTimeZone } = require('../utils');
 const { getRioOnibus } = require('../stores/rioOnibusStore');
+const { logJobExecution } = require('./jobLogs');
 
 const retention_days = Number(process.env.PARTITION_RETENTION_DAYS) || 7;
 const INACTIVITY_THRESHOLD_MINUTES = Number(process.env.INACTIVITY_THRESHOLD_MINUTES) || 15;
@@ -65,7 +66,10 @@ async function enrichRecordsWithSentido(records) {
 
 async function saveRioToGpsSentido(records) {
     if (!records || records.length === 0) return;
+    
+    const startedAt = new Date();
     const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
+    let totalProcessed = 0;
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE);
@@ -102,10 +106,26 @@ async function saveRioToGpsSentido(records) {
                 'SELECT fn_upsert_gps_sentido_rio_batch_json($1::jsonb)',
                 [JSON.stringify(recordsJson)]
             );
+            totalProcessed += batch.length;
         } catch (err) {
             console.error('[Rio][gps_sentido] Error upserting records:', err.message);
         }
     }
+
+    // Log da subtask
+    const finishedAt = new Date();
+    const durationMs = finishedAt - startedAt;
+    
+    await logJobExecution({
+        jobName: 'saveRioToGpsSentido',
+        parentJob: 'angra-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs,
+        status: 'success',
+        infoMessage: `${totalProcessed} registros processados`
+    });
 }
 
 const TERMINAL_VISIT_DISTANCE_METERS = Number(process.env.TERMINAL_VISIT_DISTANCE_METERS) || 20;
@@ -193,12 +213,7 @@ async function deactivateInactiveOnibusEstado() {
     const deactivatedCount =
         result.rows[0]?.fn_deactivate_gps_onibus_estado_by_ordens || 0;
 
-    if (deactivatedCount > 0) {
-        console.log(
-            `[Rio][gps_onibus_estado] Registros desativados: ${deactivatedCount}`
-        );
-    }
-
+    
     return deactivatedCount;
 }
 
