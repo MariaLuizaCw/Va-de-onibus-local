@@ -40,37 +40,3 @@ GRANT ALL ON TABLE public.itinerario TO authenticated;
 GRANT ALL ON TABLE public.itinerario TO postgres;
 
 GRANT ALL ON TABLE public.itinerario TO service_role;
--- Index: idx_itinerario_geom_gist
-
--- DROP INDEX IF EXISTS public.idx_itinerario_geom_gist;
-
-CREATE INDEX IF NOT EXISTS idx_itinerario_geom_gist
-    ON public.itinerario USING gist
-    (the_geom)
-    TABLESPACE pg_default;
--- Index: idx_itinerario_linha_habilitado
-
--- DROP INDEX IF EXISTS public.idx_itinerario_linha_habilitado;
-
-CREATE INDEX IF NOT EXISTS idx_itinerario_linha_habilitado
-    ON public.itinerario USING btree
-    (numero_linha COLLATE pg_catalog."default" ASC NULLS LAST, habilitado ASC NULLS LAST)
-    TABLESPACE pg_default
-    WHERE habilitado = true;
--- Index: idx_itinerario_numero_linha_habilitado
-
--- DROP INDEX IF EXISTS public.idx_itinerario_numero_linha_habilitado;
-
-CREATE INDEX IF NOT EXISTS idx_itinerario_numero_linha_habilitado
-    ON public.itinerario USING btree
-    (numero_linha COLLATE pg_catalog."default" ASC NULLS LAST)
-    TABLESPACE pg_default
-    WHERE habilitado = true;
--- Index: idx_itinerario_the_geom_gist
-
--- DROP INDEX IF EXISTS public.idx_itinerario_the_geom_gist;
-
-CREATE INDEX IF NOT EXISTS idx_itinerario_the_geom_gist
-    ON public.itinerario USING gist
-    (the_geom)
-    TABLESPACE pg_default;

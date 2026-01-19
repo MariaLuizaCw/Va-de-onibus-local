@@ -42,17 +42,27 @@ done
 # ⚠️ ajuste se o nome do container for outro
 POSTGRES_CONTAINER_NAME=vadeonibus-db
 
-SQL_DIR="database/functions"
+SQL_DIRS=("database/functions" "database/creates")
 
-if [ ! -d "$SQL_DIR" ]; then
-  echo "❌ Diretório $SQL_DIR não encontrado"
-  exit 1
-fi
+# Verificar se os diretórios existem
+for SQL_DIR in "${SQL_DIRS[@]}"; do
+  if [ ! -d "$SQL_DIR" ]; then
+    echo "❌ Diretório $SQL_DIR não encontrado"
+    exit 1
+  fi
+done
 
-FILES=$(ls "$SQL_DIR"/*.sql 2>/dev/null | sort)
+# Coletar todos os arquivos SQL dos diretórios
+FILES=""
+for SQL_DIR in "${SQL_DIRS[@]}"; do
+  FILES="$FILES $(ls "$SQL_DIR"/*.sql 2>/dev/null | sort)"
+done
+
+# Remover espaços duplicados no início
+FILES=$(echo "$FILES" | xargs -n1 | sort)
 
 if [ -z "$FILES" ]; then
-  echo "⚠ Nenhum arquivo .sql encontrado em $SQL_DIR"
+  echo "⚠ Nenhum arquivo .sql encontrado nos diretórios"
   exit 0
 fi
 
@@ -87,4 +97,4 @@ for FILE in $FILES; do
 done
 
 echo ""
-echo "✅ Todos os scripts SQL foram aplicados com sucesso!"
+echo "✅ Todos os scripts SQL (creates + functions) foram aplicados com sucesso!"

@@ -10,3 +10,4 @@ dist
 build
 .env
 db_data
+data

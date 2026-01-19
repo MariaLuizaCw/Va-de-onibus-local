@@ -7,7 +7,7 @@ const { loadLatestRioOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSent
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
 const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
 const { resolveRioTimestamp, resolveAngraTimestamp, summarizeLines } = require('./utils/stats');
-const { loadItinerarioIntoMemory } = require('./itinerarioStore');
+const { loadItinerarioIntoMemory } = require('./stores/itinerarioStore');
 const { startScheduler, stopScheduler } = require('./jobs');
 
 const app = express();
@@ -131,31 +131,7 @@ if (API_BASE_PATH) {
 // Lifecycle helpers --------------------------------------------------------
 const CATCHUP_HOURS = Number(process.env.CATCHUP_HOURS) || 1;
 
-async function runInitialTasks() {
-    console.log('[bootstrap] Carregando snapshots...');
-    // await loadLatestRioOnibusSnapshot()
-    //     .then(snapshot => { if (snapshot) replaceRioOnibusSnapshot(snapshot); })
-    //     .catch(err => console.error('[snapshot][rio] failed to load', err));
-
-    // await loadLatestAngraOnibusSnapshot()
-    //     .then(snapshot => { if (snapshot) replaceAngraOnibusSnapshot(snapshot); })
-    //     .catch(err => console.error('[snapshot][angra] failed to load', err));
-
-    console.log('[bootstrap] Carregando itinerário...');
-    await loadItinerarioIntoMemory().catch(err => {
-        console.error('[itinerario] failed to load', err);
-        throw err;
-    });
-
-    console.log('[bootstrap] Carregando linhas circulares de Angra...');
-    await fetchCircularLines().catch(err => console.error('[Angra] Initial circular lines fetch failed', err));
-
-    // console.log('[bootstrap] Executando verificação inicial de partições...');
-    // await ensureFuturePartitions();
-}
-
 async function bootstrap() {
-    await runInitialTasks();
     await startScheduler();
 }
 

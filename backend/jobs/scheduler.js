@@ -4,7 +4,7 @@ const { fetchAngraGPSData, fetchCircularLines } = require('../fetchers/angraFetc
 const { saveRioOnibusSnapshot, saveAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('../database/index');
 const { getRioOnibus } = require('../stores/rioOnibusStore');
 const { getAngraOnibus } = require('../stores/angraOnibusStore');
-const { loadItinerarioIntoMemory } = require('../itinerarioStore');
+const { loadItinerarioIntoMemory } = require('../stores/itinerarioStore');
 const { logJobExecution, deleteOldJobExecutions } = require('../database/jobLogs');
 const jobsConfig = require('../config/jobs.json');
 
@@ -92,9 +92,30 @@ function scheduleJobs() {
 async function startScheduler() {
     console.log('[scheduler] Iniciando node-cron scheduler...');
     
+    // Executar jobs com runOnStartup: true primeiro
+    await runStartupJobs();
+    
+    // Depois agendar os jobs recorrentes
     scheduleJobs();
     
     console.log(`[scheduler] ${scheduledTasks.size} jobs configurados e prontos`);
+}
+
+async function runStartupJobs() {
+    console.log('[scheduler] Verificando jobs para execução no startup...');
+    
+    for (const jobConfig of jobsConfig.jobs) {
+        const { name, handler, runOnStartup = false, options = {} } = jobConfig;
+        
+        if (runOnStartup && handlers[handler]) {
+            console.log(`[scheduler] Executando job no startup: ${name}`);
+            try {
+                await executeJob(name, 'startup', handlers[handler], options, false);
+            } catch (error) {
+                console.error(`[scheduler] Erro ao executar job ${name} no startup:`, error.message);
+            }
+        }
+    }
 }
 
 async function stopScheduler() {

@@ -4,16 +4,30 @@
       "name": "itinerario-refresh",
       "handler": "loadItinerarioIntoMemory",
       "cron": "0 */6 * * *",
-      "description": "Atualiza cache do itinerário a cada 6 horas"
+      "description": "Atualiza cache do itinerário a cada 6 horas",
+      "runOnStartup": true
     },
     {
       "name": "angra-gps-fetch",
       "handler": "fetchAngraGPSData",
-      "cron": "* * * * *",
-      "description": "Busca dados GPS de Angra a cada minuto",
+      "cron": "*/15 * * * * *",
+      "description": "Busca dados GPS de Angra a cada 15 segundos",
       "options": {
         "saveToGpsSentido": true
       }
+    },
+    {
+      "name": "angra-circular-lines",
+      "handler": "fetchCircularLines",
+      "cron": "0 2 * * *",
+      "description": "Atualiza definições de linhas circulares de Angra diariamente às 2h",
+      "runOnStartup": true
+    },
+    {
+      "name": "cleanup-job-logs",
+      "handler": "deleteOldJobExecutions",
+      "cron": "0 3 * * *",
+      "description": "Remove logs de jobs com mais de 3 meses diariamente às 3h"
     }
   ]
 }

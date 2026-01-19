@@ -23,11 +23,3 @@ GRANT ALL ON TABLE public.onibus_snapshots TO authenticated;
 GRANT ALL ON TABLE public.onibus_snapshots TO postgres;
 
 GRANT ALL ON TABLE public.onibus_snapshots TO service_role;
--- Index: rio_onibus_snapshots_created_at_idx
-
--- DROP INDEX IF EXISTS public.rio_onibus_snapshots_created_at_idx;
-
-CREATE INDEX IF NOT EXISTS rio_onibus_snapshots_created_at_idx
-    ON public.onibus_snapshots USING btree
-    (created_at DESC NULLS FIRST)
-    TABLESPACE pg_default;

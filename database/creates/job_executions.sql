@@ -16,4 +16,3 @@ CREATE TABLE IF NOT EXISTS job_executions (
 
 CREATE INDEX IF NOT EXISTS idx_job_executions_job_name ON job_executions(job_name);
 CREATE INDEX IF NOT EXISTS idx_job_executions_started_at ON job_executions(started_at);
-CREATE INDEX IF NOT EXISTS idx_job_executions_status ON job_executions(status);
