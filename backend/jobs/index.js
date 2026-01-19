@@ -1,3 +1,3 @@
-const { startScheduler, stopScheduler, boss } = require('./scheduler');
+const { startScheduler, stopScheduler, scheduledTasks, executeJob } = require('./scheduler');
 
-module.exports = { startScheduler, stopScheduler, boss };
+module.exports = { startScheduler, stopScheduler, scheduledTasks, executeJob };

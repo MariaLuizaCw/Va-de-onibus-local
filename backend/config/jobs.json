@@ -12,9 +12,7 @@
       "cron": "* * * * *",
       "description": "Busca dados GPS de Angra a cada minuto",
       "options": {
-        "saveToDb": false,
-        "saveToGpsSentido": true,
-        "saveToGpsOnibusEstado": false
+        "saveToGpsSentido": true
       }
     }
   ]

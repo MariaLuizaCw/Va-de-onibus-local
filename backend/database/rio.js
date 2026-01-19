@@ -62,53 +62,6 @@ async function enrichRecordsWithSentido(records) {
     return records;
 }
 
-async function saveRioRecordsToDb(records) {
-    if (!records || records.length === 0) return;
-    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
-
-    for (let i = 0; i < records.length; i += BATCH_SIZE) {
-        const batch = records.slice(i, i + BATCH_SIZE);
-
-        const recordsJson = batch.map(record => {
-            const lat = typeof record.latitude === 'string'
-                ? Number(record.latitude.replace(',', '.'))
-                : Number(record.latitude);
-            const lon = typeof record.longitude === 'string'
-                ? Number(record.longitude.replace(',', '.'))
-                : Number(record.longitude);
-
-            return {
-                ordem: record.ordem,
-                latitude: lat,
-                longitude: lon,
-                datahora: Number(record.datahora),
-                velocidade: Number(record.velocidade),
-                linha: record.linha,
-                datahoraenvio: Number(record.datahoraenvio),
-                datahoraservidor: Number(record.datahoraservidor)
-            };
-        });
-
-        try {
-            await dbPool.query(
-                'SELECT fn_insert_gps_posicoes_rio_batch_json($1::jsonb)',
-                [JSON.stringify(recordsJson)]
-            );
-        } catch (err) {
-            console.error('[Rio] Error inserting GPS records into database:', err);
-        }
-
-
-        try {
-            await dbPool.query(
-                'select * from gps.ftdbgps_atualiza_gps_sentido()',
-                [JSON.stringify(recordsJson)]
-            );
-        } catch (err) {
-            console.error('[Rio] Erro executing atualiza_gps_sentido query', err);
-        }
-    }
-}
 
 async function saveRioToGpsSentido(records) {
     if (!records || records.length === 0) return;
@@ -251,7 +204,6 @@ async function deactivateInactiveOnibusEstado() {
 
 module.exports = {
     enrichRecordsWithSentido,
-    saveRioRecordsToDb,
     saveRioToGpsSentido,
     saveRioToGpsOnibusEstado,
     deactivateInactiveOnibusEstado,

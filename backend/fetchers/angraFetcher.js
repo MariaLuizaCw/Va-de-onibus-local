@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { saveAngraRecordsToDb, enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('../database/index');
+const { enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('../database/index');
 const { addPositions } = require('../stores/angraOnibusStore');
 
 const SSX_BASE_URL = 'https://integration.systemsatx.com.br';
@@ -181,12 +181,7 @@ async function fetchAngraGPSData(options = {}) {
             addPositions(enhancedRecords);
         }
 
-        if (saveToDb) {
-            saveAngraRecordsToDb(enhancedRecords)
-                .then(() => console.log(`[Angra][gps_posicoes] Sucesso: ${enhancedRecords.length} registros`))
-                .catch(err => console.error('[Angra][gps_posicoes] Falha:', err.message));
-        }
-
+        
         if (saveToGpsSentido) {
             saveAngraToGpsSentido(enhancedRecords)
                 .then(() => console.log(`[Angra][gps_sentido] Sucesso: ${enhancedRecords.length} registros`))

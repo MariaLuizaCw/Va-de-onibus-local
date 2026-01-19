@@ -1,6 +1,6 @@
 const { dbPool } = require('./pool');
-const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido, saveRioToGpsOnibusEstado, deactivateInactiveOnibusEstado } = require('./rio');
-const { saveAngraRecordsToDb, enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('./angra');
+const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsOnibusEstado, deactivateInactiveOnibusEstado } = require('./rio');
+const { enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('./angra');
 const { 
     loadOnibusSnapshot, 
     saveOnibusSnapshot, 
@@ -9,17 +9,14 @@ const {
     loadLatestAngraOnibusSnapshot,
     saveAngraOnibusSnapshot 
 } = require('./snapshots');
-const { ensureFuturePartitions } = require('./partitions');
 const { generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./reports');
 
 module.exports = {
     dbPool,
     enrichRecordsWithSentido,
-    saveRioRecordsToDb,
     saveRioToGpsSentido,
     saveRioToGpsOnibusEstado,
     deactivateInactiveOnibusEstado,
-    saveAngraRecordsToDb,
     enrichAngraRecordsWithSentido,
     saveAngraToGpsSentido,
     saveOnibusSnapshot,
@@ -28,7 +25,6 @@ module.exports = {
     loadLatestRioOnibusSnapshot,
     saveAngraOnibusSnapshot,
     loadLatestAngraOnibusSnapshot,
-    ensureFuturePartitions,
     generateSentidoCoverageReport,
     generateAngraRouteTypeReport,
 };

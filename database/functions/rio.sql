@@ -299,40 +299,6 @@ BEGIN
 END;
 $$;
 
--- -----------------------------------------------------------------------------
--- fn_insert_gps_posicoes_rio_batch_json
--- Insere registros GPS do Rio em batch
--- Recebe JSON array e usa jsonb_array_elements para processar
--- Usado por: rio.js -> saveRioRecordsToDb (batch)
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_insert_gps_posicoes_rio_batch_json(p_records jsonb)
-RETURNS void
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO gps_posicoes_rio (
-        ordem,
-        latitude,
-        longitude,
-        datahora,
-        velocidade,
-        linha,
-        datahoraenvio,
-        datahoraservidor
-    )
-    SELECT
-        (r.value->>'ordem')::text,
-        (r.value->>'latitude')::double precision,
-        (r.value->>'longitude')::double precision,
-        (r.value->>'datahora')::bigint,
-        (r.value->>'velocidade')::double precision,
-        (r.value->>'linha')::text,
-        (r.value->>'datahoraenvio')::bigint,
-        (r.value->>'datahoraservidor')::bigint
-    FROM jsonb_array_elements(p_records) r
-    ON CONFLICT ON CONSTRAINT gps_posicoes_rio_unique_ponto DO NOTHING;
-END;
-$$;
 
 -- -----------------------------------------------------------------------------
 -- fn_upsert_gps_sentido_rio_batch_json

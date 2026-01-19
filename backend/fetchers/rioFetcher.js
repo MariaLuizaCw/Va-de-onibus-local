@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioRecordsToDb, saveRioToGpsSentido, saveRioToGpsOnibusEstado, deactivateInactiveOnibusEstado } = require('../database/index');
+const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsOnibusEstado, deactivateInactiveOnibusEstado } = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -69,15 +69,7 @@ async function fetchRioGPSData(windowInMinutes = null, options = {}) {
 
         const dbPromises = [];
         
-        // gps_posicoes: recebe TODOS os registros (histórico completo)
-        if (saveToDb) {
-            dbPromises.push(
-                saveRioRecordsToDb(records)
-                    .then(() => console.log(`[Rio][gps_posicoes] Sucesso: ${records.length} registros`))
-                    .catch(err => console.error('[Rio][gps_posicoes] Falha:', err.message))
-            );
-        }
-
+        
 
            // gps_onibus_estado: recebe apenas os mais recentes (com sentido)
         if (saveToGpsOnibusEstado) {
