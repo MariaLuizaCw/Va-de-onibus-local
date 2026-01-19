@@ -1,6 +1,6 @@
 // Purpose: unifica chamadas HTTP ao backend, incluindo login e consulta de rotas.
 import { PUBLIC_BACKEND_URL } from '$env/static/public';
-import type { ApiRecord, LoginCredentials, RawResponse, AuthResponse, CityOption, StatsResponse } from '$lib/types/api';
+import type { ApiRecord, LoginCredentials, RawResponse, AuthResponse, CityOption, StatsResponse, JobStatsResponse, JobTimelineEntry } from '$lib/types/api';
 
 const BACKEND_BASE_URL = PUBLIC_BACKEND_URL;
 export const TOKEN_STORAGE_KEY = 'vadeonibus_jwt';
@@ -79,6 +79,82 @@ export async function fetchRouteData(city: string, linha: string, token: string)
 
 export async function fetchStats(token: string): Promise<StatsResponse> {
     const response = await fetch(`${BACKEND_BASE_URL}/stats/lines`, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    if (response.status === 401) {
+        throw new UnauthorizedError();
+    }
+
+    if (!response.ok) {
+        const message = await buildErrorMessage(response);
+        throw new Error(message);
+    }
+
+    return response.json();
+}
+
+// Job Stats API
+export async function fetchJobStats(token: string, date?: string): Promise<JobStatsResponse> {
+    const url = date 
+        ? `${BACKEND_BASE_URL}/jobs/stats?date=${date}`
+        : `${BACKEND_BASE_URL}/jobs/stats`;
+    
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    if (response.status === 401) {
+        throw new UnauthorizedError();
+    }
+
+    if (!response.ok) {
+        const message = await buildErrorMessage(response);
+        throw new Error(message);
+    }
+
+    return response.json();
+}
+
+export async function fetchJobTimeline(token: string, jobName: string, date?: string, includeChildren = false): Promise<JobTimelineEntry[]> {
+    const params = new URLSearchParams();
+    if (date) params.set('date', date);
+    if (includeChildren) params.set('includeChildren', 'true');
+    
+    const url = `${BACKEND_BASE_URL}/jobs/timeline/${encodeURIComponent(jobName)}?${params}`;
+    
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+
+    if (response.status === 401) {
+        throw new UnauthorizedError();
+    }
+
+    if (!response.ok) {
+        const message = await buildErrorMessage(response);
+        throw new Error(message);
+    }
+
+    return response.json();
+}
+
+
+export async function fetchJobHourlyDistribution(token: string, jobName: string, date?: string): Promise<JobHourlyDistribution[]> {
+    const url = date 
+        ? `${BACKEND_BASE_URL}/jobs/hourly/${encodeURIComponent(jobName)}?date=${date}`
+        : `${BACKEND_BASE_URL}/jobs/hourly/${encodeURIComponent(jobName)}`;
+    
+    const response = await fetch(url, {
         method: 'GET',
         headers: {
             Authorization: `Bearer ${token}`

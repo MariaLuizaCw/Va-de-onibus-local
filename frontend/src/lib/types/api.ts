@@ -46,3 +46,55 @@ export type StatsResponse = {
     rio: CityStats;
     angra: CityStats;
 };
+
+// Job Stats Types
+export type JobChildStats = {
+    jobName: string;
+    parentJob: string;
+    executionCount: number;
+    avgDurationMs: number;
+    stddevDurationMs: number;
+    minDurationMs: number;
+    maxDurationMs: number;
+    successCount: number;
+    errorCount: number;
+    status: 'success' | 'error' | 'mixed';
+};
+
+export type JobParentStats = {
+    jobName: string;
+    executionCount: number;
+    avgDurationMs: number;
+    stddevDurationMs: number;
+    minDurationMs: number;
+    maxDurationMs: number;
+    successCount: number;
+    errorCount: number;
+    status: 'success' | 'error' | 'mixed';
+    children: JobChildStats[];
+};
+
+export type JobStatsResponse = {
+    date: string;
+    jobs: JobParentStats[];
+};
+
+export type JobTimelineEntry = {
+    jobName: string;
+    parentJob: string | null;
+    subtask: boolean;
+    startedAt: string;
+    finishedAt: string;
+    durationMs: number;
+    status: 'success' | 'error';
+    infoMessage: string | null;
+    errorMessage: string | null;
+};
+
+export type JobHourlyDistribution = {
+    hour: number;
+    total: number;
+    successCount: number;
+    errorCount: number;
+    avgDurationMs: number;
+};

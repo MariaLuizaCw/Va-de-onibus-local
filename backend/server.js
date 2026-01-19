@@ -9,6 +9,7 @@ const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replace
 const { resolveRioTimestamp, resolveAngraTimestamp, summarizeLines } = require('./utils/stats');
 const { loadItinerarioIntoMemory } = require('./stores/itinerarioStore');
 const { startScheduler, stopScheduler } = require('./jobs');
+const { getJobStats, getJobTimeline, getJobHourlyDistribution } = require('./database/jobStats');
 
 const app = express();
 
@@ -116,6 +117,44 @@ router.post('/angra_onibus', (req, res) => {
     }
 
     return res.json(getAngraOnibus());
+});
+
+// Job Stats endpoints
+router.get('/jobs/stats', async (req, res) => {
+    try {
+        const date = req.query.date || new Date().toISOString().split('T')[0];
+        const stats = await getJobStats(date);
+        res.json(stats);
+    } catch (error) {
+        console.error('[jobs/stats] Error:', error.message);
+        res.status(500).json({ error: 'Erro ao buscar estatísticas de jobs' });
+    }
+});
+
+router.get('/jobs/timeline/:jobName', async (req, res) => {
+    try {
+        const { jobName } = req.params;
+        const date = req.query.date || new Date().toISOString().split('T')[0];
+        const includeChildren = req.query.includeChildren === 'true';
+        const timeline = await getJobTimeline(jobName, date, includeChildren);
+        res.json(timeline);
+    } catch (error) {
+        console.error('[jobs/timeline] Error:', error.message);
+        res.status(500).json({ error: 'Erro ao buscar timeline do job' });
+    }
+});
+
+
+router.get('/jobs/hourly/:jobName', async (req, res) => {
+    try {
+        const { jobName } = req.params;
+        const date = req.query.date || new Date().toISOString().split('T')[0];
+        const distribution = await getJobHourlyDistribution(jobName, date);
+        res.json(distribution);
+    } catch (error) {
+        console.error('[jobs/hourly] Error:', error.message);
+        res.status(500).json({ error: 'Erro ao buscar distribuição horária' });
+    }
 });
 
 // Mount the router with prefix (or at root if empty)
