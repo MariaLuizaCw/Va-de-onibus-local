@@ -1,9 +1,9 @@
 const cron = require('node-cron');
 const { fetchRioGPSData } = require('../fetchers/rioFetcher');
 const { fetchAngraGPSData, fetchCircularLines } = require('../fetchers/angraFetcher');
-const { saveRioOnibusSnapshot, saveAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('../database/index');
-const { getRioOnibus } = require('../stores/rioOnibusStore');
-const { getAngraOnibus } = require('../stores/angraOnibusStore');
+const { syncRioSnapshot, syncAngraSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('../database/index');
+const { getRioOnibus, replaceRioOnibusSnapshot } = require('../stores/rioOnibusStore');
+const { getAngraOnibus, replaceAngraOnibusSnapshot } = require('../stores/angraOnibusStore');
 const { loadItinerarioIntoMemory } = require('../stores/itinerarioStore');
 const { logJobExecution, deleteOldJobExecutions } = require('../database/jobLogs');
 const jobsConfig = require('../config/jobs.json');
@@ -17,8 +17,8 @@ const handlers = {
     fetchRioGPSData: (data = {}) => fetchRioGPSData(null, data),
     fetchAngraGPSData: (data = {}) => fetchAngraGPSData(data),
     fetchCircularLines,
-    saveRioOnibusSnapshot: () => saveRioOnibusSnapshot(getRioOnibus()),
-    saveAngraOnibusSnapshot: () => saveAngraOnibusSnapshot(getAngraOnibus()),
+    syncRioSnapshot: () => syncRioSnapshot(getRioOnibus, replaceRioOnibusSnapshot),
+    syncAngraSnapshot: () => syncAngraSnapshot(getAngraOnibus, replaceAngraOnibusSnapshot),
     deleteOldJobExecutions
 };
 

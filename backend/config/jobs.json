@@ -22,6 +22,20 @@
       "cron": "0 3 * * *",
       "description": "Remove logs de jobs com mais de 3 meses diariamente às 3h",
       "runOnStartup": true
+    },
+    {
+      "name": "rio-snapshot",
+      "handler": "syncRioSnapshot",
+      "cron": "*/3 * * * *",
+      "description": "Carrega snapshot do Rio no startup e salva a cada 3 minutos",
+      "runOnStartup": true
+    },
+    {
+      "name": "angra-snapshot",
+      "handler": "syncAngraSnapshot",
+      "cron": "*/3 * * * *",
+      "description": "Carrega snapshot de Angra no startup e salva a cada 3 minutos",
+      "runOnStartup": true
     }
   ]
 }

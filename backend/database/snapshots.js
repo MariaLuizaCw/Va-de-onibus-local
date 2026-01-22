@@ -1,5 +1,11 @@
 const { dbPool } = require('./pool');
 
+// Flags para controlar se já foi feito o load inicial
+const loadedSnapshots = {
+    rio: false,
+    angra: false
+};
+
 async function loadOnibusSnapshot(city = 'rio') {
     try {
         const result = await dbPool.query('SELECT * FROM fn_load_onibus_snapshot($1)', [city]);
@@ -40,6 +46,41 @@ async function saveAngraOnibusSnapshot(snapshot) {
     return saveOnibusSnapshot(snapshot, 'angra');
 }
 
+// Funções combinadas: load na primeira execução, save nas seguintes
+async function syncRioSnapshot(getSnapshotFn, replaceSnapshotFn) {
+    if (!loadedSnapshots.rio) {
+        console.log('[snapshot][rio] Primeira execução - carregando snapshot do banco...');
+        const snapshot = await loadOnibusSnapshot('rio');
+        if (snapshot && replaceSnapshotFn) {
+            replaceSnapshotFn(snapshot);
+            console.log('[snapshot][rio] Snapshot carregado com sucesso');
+        } else {
+            console.log('[snapshot][rio] Nenhum snapshot encontrado no banco');
+        }
+        loadedSnapshots.rio = true;
+    } else {
+        const snapshot = getSnapshotFn ? getSnapshotFn() : null;
+        await saveOnibusSnapshot(snapshot, 'rio');
+    }
+}
+
+async function syncAngraSnapshot(getSnapshotFn, replaceSnapshotFn) {
+    if (!loadedSnapshots.angra) {
+        console.log('[snapshot][angra] Primeira execução - carregando snapshot do banco...');
+        const snapshot = await loadOnibusSnapshot('angra');
+        if (snapshot && replaceSnapshotFn) {
+            replaceSnapshotFn(snapshot);
+            console.log('[snapshot][angra] Snapshot carregado com sucesso');
+        } else {
+            console.log('[snapshot][angra] Nenhum snapshot encontrado no banco');
+        }
+        loadedSnapshots.angra = true;
+    } else {
+        const snapshot = getSnapshotFn ? getSnapshotFn() : null;
+        await saveOnibusSnapshot(snapshot, 'angra');
+    }
+}
+
 module.exports = {
     loadOnibusSnapshot,
     saveOnibusSnapshot,
@@ -47,4 +88,6 @@ module.exports = {
     saveRioOnibusSnapshot,
     loadLatestAngraOnibusSnapshot,
     saveAngraOnibusSnapshot,
+    syncRioSnapshot,
+    syncAngraSnapshot,
 };
