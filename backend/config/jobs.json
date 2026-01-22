@@ -17,13 +17,6 @@
       }
     },
     {
-      "name": "angra-circular-lines",
-      "handler": "fetchCircularLines",
-      "cron": "0 2 * * *",
-      "description": "Atualiza definições de linhas circulares de Angra diariamente às 2h",
-      "runOnStartup": true
-    },
-    {
       "name": "cleanup-job-logs",
       "handler": "deleteOldJobExecutions",
       "cron": "0 3 * * *",
