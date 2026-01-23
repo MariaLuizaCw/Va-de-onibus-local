@@ -1,10 +1,11 @@
 <script lang="ts">
     import { createEventDispatcher } from 'svelte';
-    import type { JobParentStats } from '$lib/types/api';
+    import type { JobParentStats, JobConfig } from '$lib/types/api';
 
     export let job: JobParentStats;
     export let formatDuration: (ms: number) => string;
     export let selected = false;
+    export let jobConfig: JobConfig | null = null;
 
     const dispatch = createEventDispatcher();
 
@@ -15,7 +16,12 @@
 
 <button class="job-card" class:selected on:click={handleClick}>
     <div class="card-header">
-        <span class="job-name">{job.jobName}</span>
+        <div class="job-name-section">
+            <span class="job-name">{job.jobName}</span>
+            {#if jobConfig?.description}
+                <span class="job-description">{jobConfig.description}</span>
+            {/if}
+        </div>
         <span class="status-badge {job.status}">{job.status}</span>
     </div>
     <div class="card-stats">
@@ -67,15 +73,29 @@
 
     .card-header {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
         gap: 0.5rem;
+    }
+
+    .job-name-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        flex: 1;
     }
 
     .job-name {
         font-weight: 600;
         color: #f8fafc;
         font-size: 0.9rem;
+    }
+
+    .job-description {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        line-height: 1.3;
+        font-weight: 400;
     }
 
     .status-badge {

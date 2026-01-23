@@ -11,7 +11,7 @@
       "name": "rio-gps-fetch",
       "handler": "fetchRioGPSData",
       "cron": "0 * * * * *",
-      "description": "Busca dados GPS do Rio a cada 1 minuto",
+      "description": "Busca dados GPS do Rio a cada 1 minuto e atualiza as tabelas",
       "options": {
         "saveToGpsProximidadeTerminalEvento": true,
         "saveToGpsSentido": true,
@@ -22,7 +22,7 @@
       "name": "angra-gps-fetch",
       "handler": "fetchAngraGPSData",
       "cron": "*/15 * * * * *",
-      "description": "Busca dados GPS de Angra a cada 15 segundos",
+      "description": "Busca dados GPS de Angra a cada 15 segundos e atualiza as tabelas",
       "options": {
         "saveToGpsSentido": true,
         "updateInMemoryStore": true

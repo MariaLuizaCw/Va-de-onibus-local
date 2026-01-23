@@ -7,8 +7,8 @@
     import LogoutButton from '$lib/components/LogoutButton.svelte';
     import StatsPanel from '$lib/components/StatsPanel.svelte';
     import { appStore, cities } from '$lib/stores/app.store';
-    import { TOKEN_STORAGE_KEY, fetchJobStats, fetchJobTimeline } from '$lib/services/api';
-    import type { JobStatsResponse, JobParentStats, JobTimelineEntry, JobChildStats } from '$lib/types/api';
+    import { TOKEN_STORAGE_KEY, fetchJobStats, fetchJobTimeline, fetchJobsConfig } from '$lib/services/api';
+    import type { JobStatsResponse, JobParentStats, JobTimelineEntry, JobChildStats, JobsConfig, JobConfig } from '$lib/types/api';
     import JobCard from '$lib/components/JobCard.svelte';
     import JobTimelineChart from '$lib/components/JobTimelineChart.svelte';
     import DatePicker from '$lib/components/DatePicker.svelte';
@@ -32,6 +32,7 @@
     let timeline: JobTimelineEntry[] = [];
     let filteredTimeline: JobTimelineEntry[] = [];
     let timelineLoading = false;
+    let jobsConfig: JobsConfig | null = null;
 
     // Filtrar timeline quando subtask é selecionada
     $: filteredTimeline = selectedSubtask 
@@ -62,6 +63,7 @@
         if (token) {
             availableDates = generateAvailableDates();
             loadJobStats();
+            loadJobsConfig();
         }
     });
 
@@ -80,6 +82,16 @@
         }
     }
 
+    async function loadJobsConfig() {
+        try {
+            jobsConfig = await fetchJobsConfig();
+            console.log('Jobs config carregado:', jobsConfig);
+        } catch (err) {
+            console.error('Error loading jobs config:', err);
+            jobsConfig = null;
+        }
+    }
+
     async function loadTimeline(job: JobParentStats) {
         if (!token) return;
         selectedJob = job;
@@ -94,6 +106,16 @@
         } finally {
             timelineLoading = false;
         }
+    }
+
+    function getJobConfig(jobName: string): JobConfig | null {
+        if (!jobsConfig) {
+            console.log('jobsConfig é null para job:', jobName);
+            return null;
+        }
+        const config = jobsConfig.jobs.find(job => job.name === jobName) || null;
+        console.log(`Config para ${jobName}:`, config);
+        return config;
     }
 
     function handleDateChange(event: CustomEvent<string>) {
@@ -190,6 +212,7 @@
                                     <JobCard 
                                         {job} 
                                         {formatDuration}
+                                        jobConfig={getJobConfig(job.jobName)}
                                         selected={selectedJob?.jobName === job.jobName}
                                         on:click={() => loadTimeline(job)}
                                     />

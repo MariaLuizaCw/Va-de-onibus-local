@@ -98,3 +98,14 @@ export type JobHourlyDistribution = {
     errorCount: number;
     avgDurationMs: number;
 };
+
+export type JobConfig = {
+    name: string;
+    description: string;
+    cron: string;
+    runOnStartup: boolean;
+};
+
+export type JobsConfig = {
+    jobs: JobConfig[];
+};

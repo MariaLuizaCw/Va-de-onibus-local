@@ -5,6 +5,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    volumes:
+      - ./common_settings:/app/common_settings
     container_name: vadeonibus-backend
     environment:
       # Database connection
@@ -56,6 +58,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    volumes:
+      - ./common_settings:/app/src/lib/common_settings
     container_name: vadeonibus-frontend
     environment:
       PUBLIC_BACKEND_URL: ${BACKEND_URL}

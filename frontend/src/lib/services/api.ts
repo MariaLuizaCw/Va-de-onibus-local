@@ -1,6 +1,8 @@
 // Purpose: unifica chamadas HTTP ao backend, incluindo login e consulta de rotas.
 import { PUBLIC_BACKEND_URL } from '$env/static/public';
-import type { ApiRecord, LoginCredentials, RawResponse, AuthResponse, CityOption, StatsResponse, JobStatsResponse, JobTimelineEntry } from '$lib/types/api';
+import type { ApiRecord, LoginCredentials, RawResponse, AuthResponse, CityOption, StatsResponse, JobStatsResponse, JobTimelineEntry, JobsConfig } from '$lib/types/api';
+import jobsConfig from '$lib/common_settings/jobs.json';
+
 
 const BACKEND_BASE_URL = PUBLIC_BACKEND_URL;
 export const TOKEN_STORAGE_KEY = 'vadeonibus_jwt';
@@ -171,6 +173,11 @@ export async function fetchJobHourlyDistribution(token: string, jobName: string,
     }
 
     return response.json();
+}
+
+export async function fetchJobsConfig(): Promise<JobsConfig> {
+    // Retorna o arquivo importado diretamente, sem requisição HTTP
+    return jobsConfig as JobsConfig;
 }
 
 export { cities };

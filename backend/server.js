@@ -11,6 +11,7 @@ const { loadItinerarioIntoMemory } = require('./stores/itinerarioStore');
 const { startScheduler, stopScheduler } = require('./jobs');
 const { getJobStats, getJobTimeline, getJobHourlyDistribution } = require('./database/jobStats');
 
+
 const app = express();
 
 const AUTH_USERNAME = process.env.AUTH_USERNAME;
@@ -36,6 +37,9 @@ if (!JWT_EXPIRES_IN) {
 
 app.use(cors());
 app.use(express.json());
+
+// Servir arquivos estáticos do common_settings
+app.use('/common_settings', express.static('../common_settings'));
 
 const API_BASE_PATH = process.env.API_BASE_PATH || '';
 

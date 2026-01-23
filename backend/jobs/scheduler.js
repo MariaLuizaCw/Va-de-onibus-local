@@ -6,7 +6,7 @@ const { getRioOnibus, replaceRioOnibusSnapshot } = require('../stores/rioOnibusS
 const { getAngraOnibus, replaceAngraOnibusSnapshot } = require('../stores/angraOnibusStore');
 const { loadItinerarioIntoMemory } = require('../stores/itinerarioStore');
 const { logJobExecution, deleteOldJobExecutions } = require('../database/jobLogs');
-const jobsConfig = require('../config/jobs.json');
+const jobsConfig = require('../common_settings/jobs.json');
 
 const scheduledTasks = new Map();
 

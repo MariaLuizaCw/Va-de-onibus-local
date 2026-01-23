@@ -20,6 +20,8 @@ services:
     container_name: vadeonibus-backend
     depends_on:
       - db
+    volumes:
+      - ./common_settings:/app/common_settings
     environment:
       # Database connection
       DATABASE_HOST: db
@@ -72,6 +74,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: vadeonibus-frontend
+    volumes:
+      - ./common_settings:/app/src/lib/common_settings
     environment:
       PUBLIC_BACKEND_URL: ${BACKEND_URL}
       PUBLIC_JOB_LOG_RETENTION_DAYS: ${JOB_LOG_RETENTION_DAYS}
