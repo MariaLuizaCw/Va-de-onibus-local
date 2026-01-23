@@ -8,19 +8,31 @@
       "runOnStartup": true
     },
     {
+      "name": "rio-gps-fetch",
+      "handler": "fetchRioGPSData",
+      "cron": "0 * * * * *",
+      "description": "Busca dados GPS do Rio a cada 1 minuto",
+      "options": {
+        "saveToGpsProximidadeTerminalEvento": true,
+        "saveToGpsSentido": true,
+        "updateInMemoryStore": true
+      }
+    },
+    {
       "name": "angra-gps-fetch",
       "handler": "fetchAngraGPSData",
       "cron": "*/15 * * * * *",
       "description": "Busca dados GPS de Angra a cada 15 segundos",
       "options": {
-        "saveToGpsSentido": true
+        "saveToGpsSentido": true,
+        "updateInMemoryStore": true
       }
     },
     {
       "name": "cleanup-job-logs",
       "handler": "deleteOldJobExecutions",
       "cron": "0 3 * * *",
-      "description": "Remove logs de jobs com mais de 3 meses diariamente às 3h",
+      "description": "Remove logs de jobs com mais de 30 dias diariamente às 3h",
       "runOnStartup": true
     },
     {
@@ -35,6 +47,13 @@
       "handler": "syncAngraSnapshot",
       "cron": "*/3 * * * *",
       "description": "Carrega snapshot de Angra no startup e salva a cada 3 minutos",
+      "runOnStartup": true
+    },
+    {
+      "name": "cleanup-proximity-events",
+      "handler": "cleanupProximityEvents",
+      "cron": "0 * * * *",
+      "description": "Remove eventos de proximidade antigos cada 1 hora",
       "runOnStartup": true
     }
   ]

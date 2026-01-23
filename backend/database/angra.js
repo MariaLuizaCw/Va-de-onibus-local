@@ -108,7 +108,7 @@ async function saveAngraToGpsSentido(records) {
     if (!records || records.length === 0) return;
     
     const startedAt = new Date();
-    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
     let totalProcessed = 0;
 
     

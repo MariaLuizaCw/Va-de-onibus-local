@@ -4,6 +4,12 @@ const RETENTION_DAYS = Number(process.env.JOB_LOG_RETENTION_DAYS) || 90;
 const TIMEZONE = process.env.API_TIMEZONE || 'America/Sao_Paulo';
 
 async function logJobExecution({ jobName, parentJob = null, subtask = false, cronExpression = null, startedAt, finishedAt, durationMs, status, errorMessage = null, infoMessage = null }) {
+    // Validar datas antes de converter
+    if (!startedAt || !finishedAt || isNaN(new Date(startedAt)) || isNaN(new Date(finishedAt))) {
+        console.error('[jobLogs] Datas inválidas:', { startedAt, finishedAt });
+        return;
+    }
+    
     // Converter para timezone do .env
     const startedAtTZ = new Date(startedAt).toLocaleString("en-US", { timeZone: TIMEZONE });
     const finishedAtTZ = new Date(finishedAt).toLocaleString("en-US", { timeZone: TIMEZONE });

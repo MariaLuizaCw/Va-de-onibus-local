@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsOnibusEstado, deactivateInactiveOnibusEstado } = require('../database/index');
+const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento } = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -16,17 +16,9 @@ function deduplicateByOrdem(records) {
     return Array.from(byOrdem.values());
 }
 
-async function fetchRioGPSData(windowInMinutes = null, options = {}) {
-    if (windowInMinutes === null) {
-        windowInMinutes = Number(process.env.RIO_POLLING_WINDOW_MINUTES) || Number(process.env.POLLING_WINDOW_MINUTES) || 3;
-    }
-    const { 
-        updateInMemoryStore = true, 
-        skipEnrich = false,
-        saveToDb = true,
-        saveToGpsSentido = true,
-        saveToGpsOnibusEstado = true
-    } = options;
+async function fetchRioGPSData(options = {}) {
+    const windowInMinutes = Number(options.windowInMinutes) || Number(process.env.RIO_POLLING_WINDOW_MINUTES) || 3;
+ 
     const now = new Date();
 
     // overlap window configurável em minutos; default 3
@@ -37,8 +29,6 @@ async function fetchRioGPSData(windowInMinutes = null, options = {}) {
 
     // Log full URL used for fetchGPSData
     const urlBase = 'https://dados.mobilidade.rio/gps/sppo';
-    const queryString = `?dataInicial=${encodeURIComponent(dataInicial)}&dataFinal=${encodeURIComponent(dataFinal)}`;
-    const fullRequestUrl = `${urlBase}${queryString}`;
 
     try {
         const response = await axios.get(urlBase, {
@@ -53,59 +43,33 @@ async function fetchRioGPSData(windowInMinutes = null, options = {}) {
         // Deduplicar: manter apenas o registro mais recente de cada ordem
         // 22k registros → ~3k registros únicos
         const latestRecords = deduplicateByOrdem(records);
-        console.log(`[Rio] ${records.length} registros → ${latestRecords.length} únicos por ordem`);
+        
+  
 
-        // Enrich apenas os registros únicos (7x mais rápido)
-        if (!skipEnrich) {
+        // gps_proximidade_terminal_evento: recebe apenas registros únicos para análise
+        if (options.saveToGpsProximidadeTerminalEvento) {
+            await saveRioToGpsProximidadeTerminalEvento(latestRecords)
+                .then(() => console.log(`[Rio][gps_proximidade_terminal_evento] Sucesso: ${latestRecords.length} registros`))
+                .catch(err => console.error('[Rio][gps_proximidade_terminal_evento] Falha:', err.message))
+        }
+        
+        // gps_sentido: recebe apenas os mais recentes (com sentido)
+        if (options.saveToGpsSentido) {
+            // Enrich apenas os registros únicos e usar retorno direto
             try {
-                await enrichRecordsWithSentido(latestRecords);
+                const enrichedRecords = await enrichRecordsWithSentido(latestRecords);
+                
+                await saveRioToGpsSentido(enrichedRecords)
+                    .then(() => console.log(`[Rio][gps_sentido] Sucesso: ${enrichedRecords.length} registros`))
+                    .catch(err => console.error('[Rio][gps_sentido] Falha:', err.message))
             } catch (err) {
                 console.error('[Rio][sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
             }
         }
 
-        // Store em memória recebe apenas os mais recentes (já enriquecidos)
+ 
 
-
-        const dbPromises = [];
-        
-        
-
-           // gps_onibus_estado: recebe apenas os mais recentes (com sentido)
-        if (saveToGpsOnibusEstado) {
-            dbPromises.push(
-                saveRioToGpsOnibusEstado(records)
-                    .then(() => console.log(`[Rio][gps_onibus_estado] Sucesso: ${latestRecords.length} registros`))
-                    .catch(err => console.error('[Rio][gps_onibus_estado] Falha:', err.message))
-            );
-        }
-
-        // gps_sentido: recebe apenas os mais recentes (com sentido)
-        if (saveToGpsSentido) {
-            dbPromises.push(
-                saveRioToGpsSentido(latestRecords)
-                    .then(() => console.log(`[Rio][gps_sentido] Sucesso: ${latestRecords.length} registros`))
-                    .catch(err => console.error('[Rio][gps_sentido] Falha:', err.message))
-            );
-        }
-
-     
-
-        // Executar em paralelo
-        await Promise.allSettled(dbPromises);
-
-
-        if (updateInMemoryStore) await addPositions(latestRecords);
-
-
-        // Deactivate só depois que todos salvaram
-        if (saveToGpsOnibusEstado) {
-            deactivateInactiveOnibusEstado()
-                .then(count => {
-                    if (count > 0) console.log(`[Rio][gps_onibus_estado] Desativados ${count} ônibus inativos`);
-                })
-                .catch(err => console.error('[Rio][gps_onibus_estado] Falha ao desativar inativos:', err.message));
-        }
+        if (options.updateInMemoryStore) await addPositions(latestRecords);
 
     } catch (error) {
         const errorMsg = `[Rio] Error fetching data: ${error.message}`;

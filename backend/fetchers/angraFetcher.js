@@ -164,11 +164,7 @@ async function fetchCircularLines() {
 }
 
 async function fetchAngraGPSData(options = {}) {
-    const { 
-        updateInMemoryStore = true,
-        saveToGpsSentido = true
-    } = options;
-
+    
     try {
         const token = await getTokenLogged();
         const response = await apiRequestLogged(token);
@@ -188,11 +184,11 @@ async function fetchAngraGPSData(options = {}) {
             console.error('[Angra][sentido] enrichAngraRecordsWithSentido failed; continuing without sentido', err.message);
         }
 
-        if (updateInMemoryStore) {
+        if (options.updateInMemoryStore) {
             addPositions(latestRecords);
         }
 
-        if (saveToGpsSentido) {
+        if (options.saveToGpsSentido) {
             saveAngraToGpsSentido(latestRecords)
                 .then(() => console.log(`[Angra][gps_sentido] Sucesso: ${latestRecords.length} registros`))
                 .catch(err => console.error('[Angra][gps_sentido] Falha:', err.message));

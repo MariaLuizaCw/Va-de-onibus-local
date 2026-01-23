@@ -1,17 +1,26 @@
 const { dbPool } = require('./pool');
 const { formatDateInTimeZone } = require('../utils');
-const { getRioOnibus } = require('../stores/rioOnibusStore');
 const { logJobExecution } = require('./jobLogs');
 
-const retention_days = Number(process.env.PARTITION_RETENTION_DAYS) || 7;
-const INACTIVITY_THRESHOLD_MINUTES = Number(process.env.INACTIVITY_THRESHOLD_MINUTES) || 15;
+const PROXIMITY_EVENT_RETENTION_HOURS = Number(process.env.PROXIMITY_EVENT_RETENTION_HOURS) || 8;
+
+
+
 const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
+const TERMINAL_PASSAGE_DISTANCE_METERS = Number(process.env.TERMINAL_PASSAGE_DISTANCE_METERS) || 20;
+const TERMINAL_PROXIMITY_DISTANCE_METERS = Number(process.env.TERMINAL_PROXIMITY_DISTANCE_METERS) || 100;
+const PROXIMITY_WINDOW_MINUTES = Number(process.env.PROXIMITY_WINDOW_MINUTES) || 15;
+const PROXIMITY_MIN_DURATION_MINUTES = Number(process.env.PROXIMITY_MIN_DURATION_MINUTES) || 10;
 
 async function enrichRecordsWithSentido(records) {
-    if (!Array.isArray(records) || records.length === 0) return records;
-
-    const BATCH_SIZE = Number(process.env.SENTIDO_BATCH_SIZE) || 2000;
-
+    if (!records || records.length === 0) return [];
+    
+    const startedAt = new Date();
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
+    let totalProcessed = 0;
+    let totalEnriched = 0;
+    const allEnrichedRecords = [];
+    
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE);
 
@@ -35,32 +44,53 @@ async function enrichRecordsWithSentido(records) {
         let result;
         try {
             result = await dbPool.query(
-                'SELECT * FROM fn_enrich_gps_batch_with_sentido_json($1::jsonb, $2)',
-                [JSON.stringify(pointsJson), MAX_SNAP_DISTANCE_METERS]
+                'SELECT * FROM fn_enrich_gps_batch_with_sentido_json($1::jsonb, $2, $3, $4, $5, $6)',
+                [
+                    JSON.stringify(pointsJson), 
+                    MAX_SNAP_DISTANCE_METERS,
+                    TERMINAL_PASSAGE_DISTANCE_METERS,
+                    TERMINAL_PROXIMITY_DISTANCE_METERS,
+                    PROXIMITY_WINDOW_MINUTES,
+                    PROXIMITY_MIN_DURATION_MINUTES
+                ]
             );
         } catch (err) {
             console.error('[sentido] Error computing sentido via PostGIS:', err);
             continue;
         }
 
-        const byKey = new Map();
-        for (const row of result.rows) {
-            const key = `${String(row.linha)}|${String(row.ordem)}`;
-            byKey.set(key, row);
-        }
-
-        for (const record of batch) {
-            const key = `${String(record.linha)}|${String(record.ordem)}`;
-            const row = byKey.get(key);
-            if (!row) continue;
-            record.sentido = row.sentido != null ? String(row.sentido) : null;
-            record.distancia_metros = row.dist_m != null ? Number(row.dist_m) : null;
-            record.sentido_itinerario_id = row.itinerario_id != null ? Number(row.itinerario_id) : null;
-            record.route_name = row.route_name != null ? String(row.route_name) : null;
-        }
+        // Usar diretamente result.rows para gps_sentido - já está no formato correto
+        const enrichedRecords = result.rows.map(row => ({
+            ordem: String(row.ordem),
+            linha: String(row.linha),
+            sentido: row.sentido,
+            sentido_itinerario_id: row.itinerario_id,
+            route_name: row.route_name,
+            distancia_metros: row.dist_m,
+            longitude: batch.find(r => r.ordem === row.ordem && r.linha === row.linha)?.longitude,
+            latitude: batch.find(r => r.ordem === row.ordem && r.linha === row.linha)?.latitude,
+            datahora: batch.find(r => r.ordem === row.ordem && r.linha === row.linha)?.datahora,
+            velocidade: batch.find(r => r.ordem === row.ordem && r.linha === row.linha)?.velocidade
+        })); // Incluir todos, inclusive null (garagem)
+        allEnrichedRecords.push(...enrichedRecords);
+        totalEnriched += enrichedRecords.length;
+        totalProcessed += batch.length;
     }
 
-    return records;
+    // Log execution metrics
+    const finishedAt = new Date();
+    await logJobExecution({
+        jobName: 'enrich-rio-sentido',
+        parentJob: 'rio-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs: finishedAt - startedAt,
+        status: 'success',
+        infoMessage: `${totalProcessed} registros processados, ${totalEnriched} registros enriquecidos`
+    });
+
+    return allEnrichedRecords;
 }
 
 
@@ -68,12 +98,13 @@ async function saveRioToGpsSentido(records) {
     if (!records || records.length === 0) return;
     
     const startedAt = new Date();
-    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 2000;
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
     let totalProcessed = 0;
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE);
 
+        
         const recordsJson = batch.map(record => {
             const lat = typeof record.latitude === 'string'
                 ? Number(record.latitude.replace(',', '.'))
@@ -128,18 +159,18 @@ async function saveRioToGpsSentido(records) {
     });
 }
 
-const TERMINAL_VISIT_DISTANCE_METERS = Number(process.env.TERMINAL_VISIT_DISTANCE_METERS) || 20;
-const TERMINAL_PROXIMITY_DISTANCE_METERS = Number(process.env.TERMINAL_PROXIMITY_DISTANCE_METERS) || 100;
 
-async function saveRioToGpsOnibusEstado(records) {
+
+async function saveRioToGpsProximidadeTerminalEvento(records) {
     if (!records || records.length === 0) return;
-    const BATCH_SIZE = Number(process.env.SENTIDO_BATCH_SIZE) || 2000;
-    const PARAMS_PER_ROW = 4;
+    
+    const startedAt = new Date();
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
+    let totalProcessed = 0;
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE);
 
-        // Prepara JSON array para a function
         const pointsJson = batch.map(record => {
             const lat = typeof record.latitude === 'string'
                 ? Number(record.latitude.replace(',', '.'))
@@ -155,71 +186,62 @@ async function saveRioToGpsOnibusEstado(records) {
 
             return {
                 ordem: String(record.ordem),
-                linha: String(record.linha),
+                datahora: datahoraTimestamp,
+                linha: record.linha,
                 lon: lon,
-                lat: lat,
-                datahora: datahoraTimestamp
+                lat: lat
             };
         });
 
         try {
             await dbPool.query(
-                'SELECT fn_upsert_gps_onibus_estado_batch_json($1::jsonb, $2, $3)',
-                [JSON.stringify(pointsJson), TERMINAL_VISIT_DISTANCE_METERS, TERMINAL_PROXIMITY_DISTANCE_METERS]
+                'SELECT fn_insert_gps_proximidade_terminal_evento_json($1::jsonb, $2)',
+                [JSON.stringify(pointsJson), MAX_SNAP_DISTANCE_METERS]
             );
+            totalProcessed += batch.length;
         } catch (err) {
-            console.error('[Rio][gps_onibus_estado] Error upserting records:', err.message);
+            console.error('[Rio][gps_proximidade_terminal_evento] Error inserting records:', err.message);
         }
     }
+
+    // Log da subtask
+    const finishedAt = new Date();
+    const durationMs = finishedAt - startedAt;
+    
+    await logJobExecution({
+        jobName: 'saveRioToGpsProximidadeTerminalEvento',
+        parentJob: 'rio-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs,
+        status: 'success',
+        infoMessage: `${totalProcessed} registros processados`
+    });
 }
 
-
-async function deactivateInactiveOnibusEstado() {
-    const now = Date.now();
-    const thresholdMs = INACTIVITY_THRESHOLD_MINUTES * 60 * 1000;
-    const inactiveOrdens = new Set();
-
-    const rioOnibus = getRioOnibus();
-
-    for (const linhaKey of Object.keys(rioOnibus)) {
-        const positions = rioOnibus[linhaKey];
-        if (!Array.isArray(positions) || positions.length === 0) continue;
-
-        const pos = positions[0];
-        if (!pos || pos.ordem == null || !pos.datahora) continue;
-
-        let datahoraMs = Number(pos.datahora);
-
-        if (!Number.isFinite(datahoraMs)) {
-            const parsed = Date.parse(pos.datahora);
-            if (!Number.isFinite(parsed)) continue;
-            datahoraMs = parsed;
-        }
-
-        if (now - datahoraMs > thresholdMs) {
-            inactiveOrdens.add(String(pos.ordem));
-        }
+async function cleanupProximityEvents() {
+    // Apenas executa o cleanup - logging é feito pelo scheduler
+    try {
+        // Usar função SQL em vez de DELETE direto
+        const result = await dbPool.query(
+            'SELECT * FROM fn_cleanup_gps_proximidade_terminal_evento($1)',
+            [PROXIMITY_EVENT_RETENTION_HOURS]
+        );
+        
+        const deletedCount = result.rows.length > 0 ? (result.rows[0].deleted_count || 0) : 0;
+        
+        console.log(`[Cleanup] Proximity events: ${deletedCount} registros removidos`);
+        
+    } catch (error) {
+        console.error('[Cleanup] Error cleaning proximity events:', error.message);
+        throw error;
     }
-
-    if (inactiveOrdens.size === 0) {
-        return 0;
-    }
-
-    const result = await dbPool.query(
-        'SELECT fn_deactivate_gps_onibus_estado_by_ordens($1::jsonb)',
-        [JSON.stringify([...inactiveOrdens])]
-    );
-
-    const deactivatedCount =
-        result.rows[0]?.fn_deactivate_gps_onibus_estado_by_ordens || 0;
-
-    
-    return deactivatedCount;
 }
 
 module.exports = {
     enrichRecordsWithSentido,
     saveRioToGpsSentido,
-    saveRioToGpsOnibusEstado,
-    deactivateInactiveOnibusEstado,
+    saveRioToGpsProximidadeTerminalEvento,
+    cleanupProximityEvents,
 };
