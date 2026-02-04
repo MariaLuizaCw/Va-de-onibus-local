@@ -11,6 +11,7 @@ const TERMINAL_PASSAGE_DISTANCE_METERS = Number(process.env.TERMINAL_PASSAGE_DIS
 const TERMINAL_PROXIMITY_DISTANCE_METERS = Number(process.env.TERMINAL_PROXIMITY_DISTANCE_METERS) || 100;
 const PROXIMITY_WINDOW_MINUTES = Number(process.env.PROXIMITY_WINDOW_MINUTES) || 15;
 const PROXIMITY_MIN_DURATION_MINUTES = Number(process.env.PROXIMITY_MIN_DURATION_MINUTES) || 10;
+const TRIP_MIN_DURATION_MINUTES = Number(process.env.TRIP_MIN_DURATION_MINUTES) || 25;
 
 async function enrichRecordsWithSentido(records) {
     if (!records || records.length === 0) return [];
@@ -134,8 +135,8 @@ async function saveRioToGpsSentido(records) {
 
         try {
             await dbPool.query(
-                'SELECT fn_upsert_gps_sentido_rio_batch_json($1::jsonb)',
-                [JSON.stringify(recordsJson)]
+                'SELECT fn_upsert_gps_sentido_rio_batch_json($1::jsonb, $2::integer)',
+                [JSON.stringify(recordsJson), TRIP_MIN_DURATION_MINUTES]
             );
             totalProcessed += batch.length;
         } catch (err) {
@@ -239,9 +240,30 @@ async function cleanupProximityEvents() {
     }
 }
 
+async function cleanupHistoricoViagens() {
+    const retentionDays = Number(process.env.HISTORICO_VIAGENS_RETENTION_DAYS) || 30;
+    
+    try {
+        const result = await dbPool.query(
+            'SELECT fn_cleanup_historico_viagens($1::integer)',
+            [retentionDays]
+        );
+        
+        const deletedCount = result.rows.length > 0 ? (result.rows[0].deleted_count || 0) : 0;
+        
+        console.log(`[Cleanup] Histórico de viagens: ${deletedCount} registros removidos`);
+        
+    } catch (error) {
+        console.error('[Cleanup] Error cleaning historico viagens:', error.message);
+        throw error;
+    }
+}
+
+
 module.exports = {
     enrichRecordsWithSentido,
     saveRioToGpsSentido,
     saveRioToGpsProximidadeTerminalEvento,
     cleanupProximityEvents,
+    cleanupHistoricoViagens,
 };

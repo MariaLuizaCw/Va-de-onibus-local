@@ -336,13 +336,61 @@ $$;
 -- fn_upsert_gps_sentido_rio_batch_json
 -- Upsert registros GPS com sentido do Rio em batch
 -- Recebe JSON array e usa jsonb_array_elements para processar
+-- Quando há conflito e o sentido muda, registra viagem no histórico
 -- Usado por: rio.js -> saveRioToGpsSentido (batch)
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_upsert_gps_sentido_rio_batch_json(p_records jsonb)
+CREATE OR REPLACE FUNCTION fn_upsert_gps_sentido_rio_batch_json(
+    p_records jsonb,
+    p_min_duration_minutes integer DEFAULT 25
+)
 RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    -- Inserir viagens quando há mudança de sentido (conflito com sentido diferente)
+    INSERT INTO gps_historico_viagens (
+        ordem,
+        linha,
+        itinerario_id_origem,
+        itinerario_id_destino,
+        nome_terminal_origem,
+        nome_terminal_destino,
+        timestamp_chegada_origem,
+        timestamp_chegada_destino,
+        duracao_viagem
+    )
+    SELECT 
+        gs.ordem,
+        COALESCE(novo.linha, gs.linha),
+        gs.sentido_itinerario_id,
+        novo.sentido_itinerario_id,
+        gs.sentido,
+        novo.sentido,
+        gs.datahora,
+        novo.datahora,
+        novo.datahora - gs.datahora
+    FROM jsonb_array_elements(p_records) r
+    CROSS JOIN LATERAL (
+        SELECT
+            (r.value->>'ordem')::text AS ordem,
+            (r.value->>'datahora')::timestamp AS datahora,
+            (r.value->>'linha')::text AS linha,
+            (r.value->>'sentido')::text AS sentido,
+            (r.value->>'sentido_itinerario_id')::integer AS sentido_itinerario_id,
+            (r.value->>'token')::text AS token
+    ) novo
+    JOIN gps_sentido gs ON gs.ordem = novo.ordem AND gs.token = novo.token
+    JOIN public.itinerario i_origem ON i_origem.id = gs.sentido_itinerario_id
+    JOIN public.itinerario i_destino ON i_destino.id = novo.sentido_itinerario_id
+    WHERE gs.sentido IS NOT NULL
+      AND novo.sentido IS NOT NULL
+      AND LOWER(gs.sentido) <> LOWER(novo.sentido)
+      AND novo.datahora > gs.datahora
+      AND novo.datahora - gs.datahora > (p_min_duration_minutes || ' minutes')::INTERVAL
+      AND NOT ST_Equals(ST_StartPoint(i_origem.the_geom), ST_StartPoint(i_destino.the_geom))
+    ON CONFLICT (ordem, timestamp_chegada_origem, timestamp_chegada_destino) DO NOTHING;
+
+    -- Upsert normal dos registros GPS
     INSERT INTO gps_sentido (
         ordem,
         datahora,
@@ -377,6 +425,42 @@ BEGIN
         sentido_itinerario_id = EXCLUDED.sentido_itinerario_id,
         route_name = EXCLUDED.route_name
     WHERE gps_sentido.datahora IS NULL OR EXCLUDED.datahora > gps_sentido.datahora;
+END;
+$$;
+
+
+
+
+-- -----------------------------------------------------------------------------
+-- fn_cleanup_historico_viagens
+-- Remove registros de histórico de viagens mais antigos que o período de retenção
+-- Usado por: rio.js -> cleanupHistoricoViagens
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_cleanup_historico_viagens(
+    p_retention_days integer DEFAULT 30
+)
+RETURNS TABLE (
+    deleted_count bigint
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_deleted_count bigint;
+    v_cutoff_date timestamp;
+BEGIN
+    -- Calcular data de corte
+    v_cutoff_date := NOW() - (p_retention_days || ' days')::INTERVAL;
+    
+    -- Remover registros antigos
+    DELETE FROM public.gps_historico_viagens
+    WHERE created_at < v_cutoff_date;
+    
+    -- Contabiliza os registros removidos
+    GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
+    
+    -- Retorna informações sobre a operação
+    RETURN QUERY SELECT 
+        v_deleted_count::bigint;
 END;
 $$;
 
