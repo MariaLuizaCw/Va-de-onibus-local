@@ -21,20 +21,3 @@ CREATE TABLE IF NOT EXISTS public.gps_historico_viagens (
     
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-
--- Índices para consultas frequentes
-CREATE INDEX IF NOT EXISTS idx_gps_historico_viagens_ordem 
-    ON public.gps_historico_viagens (ordem);
-
-CREATE INDEX IF NOT EXISTS idx_gps_historico_viagens_linha 
-    ON public.gps_historico_viagens (linha);
-
-CREATE INDEX IF NOT EXISTS idx_gps_historico_viagens_timestamp_destino 
-    ON public.gps_historico_viagens (timestamp_chegada_destino DESC);
-
-CREATE INDEX IF NOT EXISTS idx_gps_historico_viagens_created_at 
-    ON public.gps_historico_viagens (created_at DESC);
-
--- Índice composto para evitar duplicatas
-CREATE UNIQUE INDEX IF NOT EXISTS idx_gps_historico_viagens_unique_trip
-    ON public.gps_historico_viagens (ordem, timestamp_chegada_origem, timestamp_chegada_destino);
