@@ -333,13 +333,12 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
--- fn_upsert_gps_sentido_rio_batch_json
--- Upsert registros GPS com sentido do Rio em batch
--- Recebe JSON array e usa jsonb_array_elements para processar
--- Quando há conflito e o sentido muda, registra viagem no histórico
--- Usado por: rio.js -> saveRioToGpsSentido (batch)
+-- fn_processar_viagens_rio
+-- Processa mudanças de sentido e gerencia viagens abertas/fechadas
+-- Função dedicada para lógica stateful de viagens
+-- Usado por: fn_upsert_gps_sentido_rio_batch_json
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_upsert_gps_sentido_rio_batch_json(
+CREATE OR REPLACE FUNCTION fn_processar_viagens_rio(
     p_records jsonb,
     p_min_duration_minutes integer DEFAULT 25
 )
@@ -347,50 +346,144 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    -- Inserir viagens quando há mudança de sentido (conflito com sentido diferente)
+    -- 1️⃣ Fechar SOMENTE a última viagem aberta
+    WITH novos AS (
+        SELECT 
+            (r.value->>'ordem')::text      AS ordem,
+            (r.value->>'token')::text      AS token,
+            (r.value->>'linha')::text      AS linha,
+            (r.value->>'sentido')::text    AS sentido,
+            (r.value->>'sentido_itinerario_id')::int AS itinerario_id,
+            (r.value->>'datahora')::timestamp AS datahora
+        FROM jsonb_array_elements(p_records) r
+    ),
+    mudanca AS (
+        SELECT
+            n.*,
+            gs.sentido AS sentido_anterior,
+            gs.sentido_itinerario_id AS itinerario_anterior
+        FROM novos n
+        JOIN gps_sentido gs
+          ON gs.ordem = n.ordem
+         AND gs.token = n.token
+        JOIN public.itinerario i_ant
+          ON i_ant.id = gs.sentido_itinerario_id
+        JOIN public.itinerario i_novo
+          ON i_novo.id = n.itinerario_id
+        WHERE
+            gs.sentido IS NOT NULL
+            AND n.sentido IS NOT NULL
+            AND LOWER(gs.sentido) <> LOWER(n.sentido)
+            AND gs.sentido_itinerario_id <> n.itinerario_id
+            AND NOT ST_Equals(
+                ST_StartPoint(i_ant.the_geom),
+                ST_StartPoint(i_novo.the_geom)
+            )
+            -- AND n.datahora - gs.datahora > (p_min_duration_minutes || ' minutes')::INTERVAL
+    ),
+    ultima_viagem AS (
+        SELECT DISTINCT ON (hv.ordem, hv.token)
+            hv.id,
+            m.datahora,
+            m.itinerario_id    AS itinerario_destino,
+            m.sentido          AS nome_terminal_destino
+        FROM mudanca m
+        JOIN gps_historico_viagens hv
+        ON hv.ordem = m.ordem
+        AND hv.token = m.token
+        AND hv.timestamp_fim IS NULL
+        AND m.datahora > hv.timestamp_inicio   -- 🔥 ESSENCIAL
+        ORDER BY
+            hv.ordem,
+            hv.token,
+            hv.timestamp_inicio DESC,
+            m.datahora DESC
+    )
+    UPDATE gps_historico_viagens hv
+    SET
+        timestamp_fim = uv.datahora,
+        duracao_viagem = uv.datahora - hv.timestamp_inicio,
+        itinerario_id_destino = uv.itinerario_destino,
+        nome_terminal_destino = uv.nome_terminal_destino
+    FROM ultima_viagem uv
+    WHERE hv.id = uv.id;
+
+    -- 2️⃣ Abrir nova viagem no novo sentido
+    WITH novos AS (
+        SELECT 
+            (r.value->>'ordem')::text      AS ordem,
+            (r.value->>'token')::text      AS token,
+            (r.value->>'linha')::text      AS linha,
+            (r.value->>'sentido')::text    AS sentido,
+            (r.value->>'sentido_itinerario_id')::int AS itinerario_id,
+            (r.value->>'datahora')::timestamp AS datahora
+        FROM jsonb_array_elements(p_records) r
+    ),
+    mudanca AS (
+        SELECT
+            n.*
+        FROM novos n
+        JOIN gps_sentido gs
+          ON gs.ordem = n.ordem
+         AND gs.token = n.token
+        JOIN public.itinerario i_ant
+          ON i_ant.id = gs.sentido_itinerario_id
+        JOIN public.itinerario i_novo
+          ON i_novo.id = n.itinerario_id
+        WHERE
+            gs.sentido IS NOT NULL
+            AND n.sentido IS NOT NULL
+            AND LOWER(gs.sentido) <> LOWER(n.sentido)
+            AND gs.sentido_itinerario_id <> n.itinerario_id
+            AND NOT ST_Equals(
+                ST_StartPoint(i_ant.the_geom),
+                ST_StartPoint(i_novo.the_geom)
+            )
+            -- AND n.datahora - gs.datahora > (p_min_duration_minutes || ' minutes')::INTERVAL
+    )
     INSERT INTO gps_historico_viagens (
         ordem,
+        token,
         linha,
         itinerario_id_origem,
-        itinerario_id_destino,
         nome_terminal_origem,
-        nome_terminal_destino,
-        timestamp_chegada_origem,
-        timestamp_chegada_destino,
+        timestamp_inicio,
+        timestamp_fim,
         duracao_viagem
     )
-    SELECT 
-        gs.ordem,
-        COALESCE(novo.linha, gs.linha),
-        gs.sentido_itinerario_id,
-        novo.sentido_itinerario_id,
-        gs.sentido,
-        novo.sentido,
-        gs.datahora,
-        novo.datahora,
-        novo.datahora - gs.datahora
-    FROM jsonb_array_elements(p_records) r
-    CROSS JOIN LATERAL (
-        SELECT
-            (r.value->>'ordem')::text AS ordem,
-            (r.value->>'datahora')::timestamp AS datahora,
-            (r.value->>'linha')::text AS linha,
-            (r.value->>'sentido')::text AS sentido,
-            (r.value->>'sentido_itinerario_id')::integer AS sentido_itinerario_id,
-            (r.value->>'token')::text AS token
-    ) novo
-    JOIN gps_sentido gs ON gs.ordem = novo.ordem AND gs.token = novo.token
-    JOIN public.itinerario i_origem ON i_origem.id = gs.sentido_itinerario_id
-    JOIN public.itinerario i_destino ON i_destino.id = novo.sentido_itinerario_id
-    WHERE gs.sentido IS NOT NULL
-      AND novo.sentido IS NOT NULL
-      AND LOWER(gs.sentido) <> LOWER(novo.sentido)
-      AND novo.datahora > gs.datahora
-      AND novo.datahora - gs.datahora > (p_min_duration_minutes || ' minutes')::INTERVAL
-      AND NOT ST_Equals(ST_StartPoint(i_origem.the_geom), ST_StartPoint(i_destino.the_geom))
-    ON CONFLICT (ordem, timestamp_chegada_origem, timestamp_chegada_destino) DO NOTHING;
+    SELECT
+        m.ordem,
+        m.token,
+        m.linha,
+        m.itinerario_id,
+        m.sentido,
+        m.datahora,
+        NULL,
+        NULL
+    FROM mudanca m
+    ON CONFLICT (ordem, token, timestamp_inicio) DO NOTHING;
+END;
+$$;
 
-    -- Upsert normal dos registros GPS
+-- -----------------------------------------------------------------------------
+-- fn_upsert_gps_sentido_rio_batch_json
+-- Upsert registros GPS com sentido do Rio em batch
+-- Recebe JSON array e usa jsonb_array_elements para processar
+-- Chama função dedicada para processar viagens
+-- Usado por: rio.js -> saveRioToGpsSentido (batch)
+-- -----------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION fn_upsert_gps_sentido_rio_batch_json(
+    p_records jsonb
+)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- Processar viagens com lógica stateful
+    PERFORM fn_processar_viagens_rio(p_records);
+
+    -- Upsert normal dos registros GPS (mantido inalterado)
     INSERT INTO gps_sentido (
         ordem,
         datahora,

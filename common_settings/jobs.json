@@ -16,7 +16,7 @@
         "saveToGpsProximidadeTerminalEvento": true,
         "saveToGpsSentido": true,
         "updateInMemoryStore": true,
-        "processHistoricoViagens": false
+        "processarViagens": true
       }
     },
     {
@@ -62,7 +62,7 @@
       "handler": "cleanupHistoricoViagens",
       "cron": "0 2 * * *",
       "description": "Remove histórico de viagens antigos (mantém 1 mês) - executa diariamente às 2h",
-      "runOnStartup": true
+      "runOnStartup": false
     }
   ]
 }

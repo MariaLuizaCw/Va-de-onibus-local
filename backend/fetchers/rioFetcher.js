@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento } = require('../database/index');
+const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio } = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -53,12 +53,24 @@ async function fetchRioGPSData(options = {}) {
                 .catch(err => console.error('[Rio][gps_proximidade_terminal_evento] Falha:', err.message))
         }
         
-        // gps_sentido: recebe apenas os mais recentes (com sentido)
+
+        const enrichedRecords = await enrichRecordsWithSentido(latestRecords);
+        
+        // processar viagens: recebe registros enriquecidos para detectar mudanças de sentido (ANTES do upsert)
+        if (options.processarViagens) {
+            try {
+                await processarViagensRio(enrichedRecords)
+                    .then(() => console.log(`[Rio][viagens] Sucesso: ${enrichedRecords.length} registros processados`))
+                    .catch(err => console.error('[Rio][viagens] Falha:', err.message))
+            } catch (err) {
+                console.error('[Rio][viagens] processarViagensRio failed', err);
+            }
+        }
+
+        // gps_sentido: recebe apenas os mais recentes (com sentido) (DEPOIS do processamento de viagens)
         if (options.saveToGpsSentido) {
             // Enrich apenas os registros únicos e usar retorno direto
             try {
-                const enrichedRecords = await enrichRecordsWithSentido(latestRecords);
-                
                 await saveRioToGpsSentido(enrichedRecords)
                     .then(() => console.log(`[Rio][gps_sentido] Sucesso: ${enrichedRecords.length} registros`))
                     .catch(err => console.error('[Rio][gps_sentido] Falha:', err.message))

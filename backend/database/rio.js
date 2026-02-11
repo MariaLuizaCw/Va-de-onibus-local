@@ -11,7 +11,6 @@ const TERMINAL_PASSAGE_DISTANCE_METERS = Number(process.env.TERMINAL_PASSAGE_DIS
 const TERMINAL_PROXIMITY_DISTANCE_METERS = Number(process.env.TERMINAL_PROXIMITY_DISTANCE_METERS) || 100;
 const PROXIMITY_WINDOW_MINUTES = Number(process.env.PROXIMITY_WINDOW_MINUTES) || 15;
 const PROXIMITY_MIN_DURATION_MINUTES = Number(process.env.PROXIMITY_MIN_DURATION_MINUTES) || 10;
-const TRIP_MIN_DURATION_MINUTES = Number(process.env.TRIP_MIN_DURATION_MINUTES) || 25;
 
 async function enrichRecordsWithSentido(records) {
     if (!records || records.length === 0) return [];
@@ -135,8 +134,8 @@ async function saveRioToGpsSentido(records) {
 
         try {
             await dbPool.query(
-                'SELECT fn_upsert_gps_sentido_rio_batch_json($1::jsonb, $2::integer)',
-                [JSON.stringify(recordsJson), TRIP_MIN_DURATION_MINUTES]
+                'SELECT fn_upsert_gps_sentido_rio_batch_json($1::jsonb)',
+                [JSON.stringify(recordsJson)]
             );
             totalProcessed += batch.length;
         } catch (err) {
@@ -259,11 +258,66 @@ async function cleanupHistoricoViagens() {
     }
 }
 
+async function processarViagensRio(records) {
+    if (!records || records.length === 0) return;
+    
+    const startedAt = new Date();
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
+    let totalProcessed = 0;
+
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+
+        const recordsJson = batch.map(record => {
+            const datahoraMs = Number(record.datahora);
+            const datahoraTimestamp = Number.isFinite(datahoraMs)
+                ? formatDateInTimeZone(new Date(datahoraMs))
+                : null;
+
+            return {
+                ordem: record.ordem,
+                datahora: datahoraTimestamp,
+                linha: record.linha,
+                sentido: record.sentido || null,
+                sentido_itinerario_id: record.sentido_itinerario_id || null,
+                token: 'PMRJ'
+            };
+        });
+        
+        try {
+            await dbPool.query(
+                'SELECT fn_processar_viagens_rio($1::jsonb)',
+                [JSON.stringify(recordsJson)]
+            );
+            totalProcessed += batch.length;
+        } catch (err) {
+            console.error('[Rio][viagens] Error processing trips:', err.message);
+        }
+    }
+
+    // Log da subtask
+    const finishedAt = new Date();
+    const durationMs = finishedAt - startedAt;
+    
+    await logJobExecution({
+        jobName: 'processarViagensRio',
+        parentJob: 'rio-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs,
+        status: 'success',
+        infoMessage: `${totalProcessed} registros processados para viagens`
+    });
+
+    return totalProcessed;
+}
 
 module.exports = {
     enrichRecordsWithSentido,
     saveRioToGpsSentido,
     saveRioToGpsProximidadeTerminalEvento,
+    processarViagensRio,
     cleanupProximityEvents,
     cleanupHistoricoViagens,
 };

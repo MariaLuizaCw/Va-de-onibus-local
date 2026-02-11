@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const { fetchRioGPSData } = require('../fetchers/rioFetcher');
 const { fetchAngraGPSData, fetchCircularLines } = require('../fetchers/angraFetcher');
-const { syncRioSnapshot, syncAngraSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport, cleanupProximityEvents, cleanupHistoricoViagens } = require('../database/index');
+const { syncRioSnapshot, syncAngraSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport, cleanupProximityEvents, cleanupHistoricoViagens, processarViagensRio } = require('../database/index');
 const { getRioOnibus, replaceRioOnibusSnapshot } = require('../stores/rioOnibusStore');
 const { getAngraOnibus, replaceAngraOnibusSnapshot } = require('../stores/angraOnibusStore');
 const { loadItinerarioIntoMemory } = require('../stores/itinerarioStore');
