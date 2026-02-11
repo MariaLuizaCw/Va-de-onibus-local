@@ -415,7 +415,7 @@ BEGIN
         (r.value->>'route_name')::text,
         (r.value->>'token')::text
     FROM jsonb_array_elements(p_records) r
-    ON CONFLICT (ordem, token) DO UPDATE SET
+    ON CONFLICT (token, ordem) DO UPDATE SET
         datahora = EXCLUDED.datahora,
         linha = EXCLUDED.linha,
         latitude = EXCLUDED.latitude,

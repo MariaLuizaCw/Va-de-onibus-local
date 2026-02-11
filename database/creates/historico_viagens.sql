@@ -21,3 +21,7 @@ CREATE TABLE IF NOT EXISTS public.gps_historico_viagens (
     
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Índice único para evitar viagens duplicadas
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gps_historico_viagens_unique_trip 
+    ON public.gps_historico_viagens (ordem, timestamp_chegada_origem, timestamp_chegada_destino);
