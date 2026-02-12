@@ -94,7 +94,8 @@ RETURNS TABLE (
     sentido text,
     itinerario_id integer,
     route_name text,
-    dist_m numeric
+    dist_m numeric,
+    metodo_inferencia text
 )
 LANGUAGE plpgsql
 AS $$
@@ -183,16 +184,17 @@ BEGIN
     -- CANDIDATOS: União das regras A e B, escolher o mais recente
     -- =========================================================================
     candidatos AS (
-        SELECT ra.ordem, ra.linha, ra.itinerario_id, ra.sentido, ra.timestamp_evidencia FROM regra_a ra
+        SELECT ra.ordem, ra.linha, ra.itinerario_id, ra.sentido, ra.timestamp_evidencia, 'regra_a'::text AS origem FROM regra_a ra
         UNION ALL
-        SELECT rb.ordem, rb.linha, rb.itinerario_id, rb.sentido, rb.timestamp_evidencia FROM regra_b rb
+        SELECT rb.ordem, rb.linha, rb.itinerario_id, rb.sentido, rb.timestamp_evidencia, 'regra_b'::text AS origem FROM regra_b rb
     ),
     candidato_escolhido AS (
         SELECT DISTINCT ON (cand.ordem)
             cand.ordem,
             cand.linha,
             cand.itinerario_id,
-            cand.sentido
+            cand.sentido,
+            cand.origem
         FROM candidatos cand
         ORDER BY cand.ordem, cand.timestamp_evidencia DESC
     ),
@@ -206,6 +208,7 @@ BEGIN
             c.linha,
             c.itinerario_id,
             c.sentido,
+            c.origem,
             i.route_name,
             ST_Distance(
                 ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326)::geography,
@@ -273,10 +276,20 @@ BEGIN
                 ELSE NULL
             END AS route_name,
             CASE
-                WHEN v.dist_proj <= p_max_snap_distance_meters THEN ROUND(v.dist_proj::numeric, 2)
-                WHEN f.dist_proj <= p_max_snap_distance_meters THEN ROUND(f.dist_proj::numeric, 2)
+                WHEN v.dist_proj <= p_max_snap_distance_meters THEN ROUND(v.dist_proj::numeric, 1)
+                WHEN f.dist_proj <= p_max_snap_distance_meters THEN ROUND(f.dist_proj::numeric, 1)
                 ELSE NULL
-            END AS dist_m
+            END AS dist_m,
+            CASE
+                -- Candidato válido com validação espacial OK
+                WHEN v.dist_proj <= p_max_snap_distance_meters THEN v.origem
+                -- Candidato existia mas validação falhou, usou fallback
+                WHEN v.origem IS NOT NULL AND f.dist_proj <= p_max_snap_distance_meters THEN v.origem || '_fallback'
+                -- Sem candidato, usou apenas projeção espacial
+                WHEN v.origem IS NULL AND f.dist_proj <= p_max_snap_distance_meters THEN 'projecao'
+                -- Nenhum método funcionou (garagem)
+                ELSE NULL
+            END AS metodo_inferencia
         FROM pts
         LEFT JOIN validacao_espacial v ON v.ordem = pts.ordem
         LEFT JOIN fallback_melhor f ON f.ordem = pts.ordem
@@ -288,7 +301,8 @@ BEGIN
         r.sentido,
         r.itinerario_id,
         r.route_name,
-        r.dist_m
+        r.dist_m,
+        r.metodo_inferencia
     FROM resultado r;
 END;
 $$;
@@ -354,7 +368,8 @@ BEGIN
             (r.value->>'linha')::text      AS linha,
             (r.value->>'sentido')::text    AS sentido,
             (r.value->>'sentido_itinerario_id')::int AS itinerario_id,
-            (r.value->>'datahora')::timestamp AS datahora
+            (r.value->>'datahora')::timestamp AS datahora,
+            (r.value->>'metodo_inferencia')::text AS metodo_inferencia
         FROM jsonb_array_elements(p_records) r
     ),
     mudanca AS (
@@ -386,7 +401,8 @@ BEGIN
             hv.id,
             m.datahora,
             m.itinerario_id    AS itinerario_destino,
-            m.sentido          AS nome_terminal_destino
+            m.sentido          AS nome_terminal_destino,
+            m.metodo_inferencia AS metodo_inferencia_destino
         FROM mudanca m
         JOIN gps_historico_viagens hv
         ON hv.ordem = m.ordem
@@ -404,7 +420,8 @@ BEGIN
         timestamp_fim = uv.datahora,
         duracao_viagem = uv.datahora - hv.timestamp_inicio,
         itinerario_id_destino = uv.itinerario_destino,
-        nome_terminal_destino = uv.nome_terminal_destino
+        nome_terminal_destino = uv.nome_terminal_destino,
+        metodo_inferencia_destino = uv.metodo_inferencia_destino
     FROM ultima_viagem uv
     WHERE hv.id = uv.id;
 
@@ -416,7 +433,8 @@ BEGIN
             (r.value->>'linha')::text      AS linha,
             (r.value->>'sentido')::text    AS sentido,
             (r.value->>'sentido_itinerario_id')::int AS itinerario_id,
-            (r.value->>'datahora')::timestamp AS datahora
+            (r.value->>'datahora')::timestamp AS datahora,
+            (r.value->>'metodo_inferencia')::text AS metodo_inferencia
         FROM jsonb_array_elements(p_records) r
     ),
     mudanca AS (
@@ -447,6 +465,7 @@ BEGIN
         linha,
         itinerario_id_origem,
         nome_terminal_origem,
+        metodo_inferencia_origem,
         timestamp_inicio,
         timestamp_fim,
         duracao_viagem
@@ -457,6 +476,7 @@ BEGIN
         m.linha,
         m.itinerario_id,
         m.sentido,
+        m.metodo_inferencia,
         m.datahora,
         NULL,
         NULL

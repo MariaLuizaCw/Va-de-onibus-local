@@ -67,6 +67,7 @@ async function enrichRecordsWithSentido(records) {
             sentido_itinerario_id: row.itinerario_id,
             route_name: row.route_name,
             distancia_metros: row.dist_m,
+            metodo_inferencia: row.metodo_inferencia,
             longitude: batch.find(r => r.ordem === row.ordem && r.linha === row.linha)?.longitude,
             latitude: batch.find(r => r.ordem === row.ordem && r.linha === row.linha)?.latitude,
             datahora: batch.find(r => r.ordem === row.ordem && r.linha === row.linha)?.datahora,
@@ -280,6 +281,7 @@ async function processarViagensRio(records) {
                 linha: record.linha,
                 sentido: record.sentido || null,
                 sentido_itinerario_id: record.sentido_itinerario_id || null,
+                metodo_inferencia: record.metodo_inferencia || null,
                 token: 'PMRJ'
             };
         });

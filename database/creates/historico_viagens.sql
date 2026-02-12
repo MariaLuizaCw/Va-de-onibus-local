@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS public.gps_historico_viagens (
     nome_terminal_origem TEXT,
     nome_terminal_destino TEXT,
     
+    metodo_inferencia_origem TEXT,
+    metodo_inferencia_destino TEXT,
+    
     timestamp_inicio TIMESTAMP NOT NULL,
     timestamp_fim TIMESTAMP,
     
