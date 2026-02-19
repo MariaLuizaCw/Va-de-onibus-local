@@ -6,6 +6,7 @@ const { fetchAngraGPSData, fetchCircularLines } = require('./fetchers/angraFetch
 const { loadLatestRioOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./database/index');
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
 const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
+const { getRioItaOnibus, getLastPositions: getRioItaLastPositions, replaceRioItaOnibusSnapshot } = require('./stores/rioItaStore');
 const { resolveRioTimestamp, resolveAngraTimestamp, summarizeLines } = require('./utils/stats');
 const { loadItinerarioIntoMemory } = require('./stores/itinerarioStore');
 const { startScheduler, stopScheduler } = require('./jobs');
@@ -121,6 +122,18 @@ router.post('/angra_onibus', (req, res) => {
     }
 
     return res.json(getAngraOnibus());
+});
+
+// RioIta endpoints - busca por ordem (Prefixo)
+router.post('/rioita_onibus', (req, res) => {
+    const { ordem } = req.body || {};
+
+    if (ordem != null && String(ordem).trim() !== '') {
+        const positions = getRioItaLastPositions(ordem);
+        return res.json({ ordem: String(ordem), positions });
+    }
+
+    return res.json(getRioItaOnibus());
 });
 
 // Job Stats endpoints

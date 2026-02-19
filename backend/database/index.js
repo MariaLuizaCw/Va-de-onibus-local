@@ -9,7 +9,8 @@ const {
     loadLatestAngraOnibusSnapshot,
     saveAngraOnibusSnapshot,
     syncRioSnapshot,
-    syncAngraSnapshot
+    syncAngraSnapshot,
+    syncRioItaSnapshot
 } = require('./snapshots');
 const { generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./reports');
 
@@ -31,6 +32,7 @@ module.exports = {
     loadLatestAngraOnibusSnapshot,
     syncRioSnapshot,
     syncAngraSnapshot,
+    syncRioItaSnapshot,
     generateSentidoCoverageReport,
     generateAngraRouteTypeReport,
 };

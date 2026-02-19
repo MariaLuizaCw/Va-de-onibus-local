@@ -39,8 +39,11 @@
         ? timeline.filter(t => t.jobName === selectedSubtask.jobName)
         : timeline;
 
-    $: currentCityStats = $store.stats ? ($store.city === 'rio' ? $store.stats.rio : $store.stats.angra) : null;
-    $: cityLabel = $store.city === 'rio' ? 'Rio de Janeiro' : 'Angra dos Reis';
+    $: currentCityStats = $store.stats 
+        ? ($store.city === 'rio' ? $store.stats.rio : ($store.city === 'angra' ? $store.stats.angra : null)) 
+        : null;
+    $: cityLabel = $store.city === 'rio' ? 'Rio de Janeiro' : ($store.city === 'angra' ? 'Angra dos Reis' : 'RioIta');
+    $: searchFieldLabel = $store.city === 'rioita' ? 'Ordem' : 'Linha';
 
     $: if ($store.authToken && !$store.stats && !$store.statsLoading) {
         loadStats();
@@ -327,7 +330,7 @@
                         <div class="table-header">
                             <div>
                                 <span class="subtitle">Resposta JSON</span>
-                                <h2>{cityLabel} · Linha {$store.lastSearchedLine || 'n/a'}</h2>
+                                <h2>{cityLabel} · {searchFieldLabel} {$store.lastSearchedLine || 'n/a'}</h2>
                             </div>
 
                             {#if $store.lastFetched}

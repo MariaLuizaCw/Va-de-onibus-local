@@ -43,10 +43,10 @@
     </label>
 
     <label>
-        Linha
+        {selectedCity === 'rioita' ? 'Ordem' : 'Linha'}
         <input
             type="text"
-            placeholder="Ex: 1500"
+            placeholder={selectedCity === 'rioita' ? 'Ex: 142004' : 'Ex: 1500'}
             bind:value={linha}
             autocomplete="off"
             on:input={handleLineChange}

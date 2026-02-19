@@ -3,7 +3,8 @@ const { dbPool } = require('./pool');
 // Flags para controlar se já foi feito o load inicial
 const loadedSnapshots = {
     rio: false,
-    angra: false
+    angra: false,
+    rioita: false
 };
 
 async function loadOnibusSnapshot(city = 'rio') {
@@ -81,6 +82,23 @@ async function syncAngraSnapshot(getSnapshotFn, replaceSnapshotFn) {
     }
 }
 
+async function syncRioItaSnapshot(getSnapshotFn, replaceSnapshotFn) {
+    if (!loadedSnapshots.rioita) {
+        console.log('[snapshot][rioita] Primeira execução - carregando snapshot do banco...');
+        const snapshot = await loadOnibusSnapshot('rioita');
+        if (snapshot && replaceSnapshotFn) {
+            replaceSnapshotFn(snapshot);
+            console.log('[snapshot][rioita] Snapshot carregado com sucesso');
+        } else {
+            console.log('[snapshot][rioita] Nenhum snapshot encontrado no banco');
+        }
+        loadedSnapshots.rioita = true;
+    } else {
+        const snapshot = getSnapshotFn ? getSnapshotFn() : null;
+        await saveOnibusSnapshot(snapshot, 'rioita');
+    }
+}
+
 module.exports = {
     loadOnibusSnapshot,
     saveOnibusSnapshot,
@@ -90,4 +108,5 @@ module.exports = {
     saveAngraOnibusSnapshot,
     syncRioSnapshot,
     syncAngraSnapshot,
+    syncRioItaSnapshot,
 };

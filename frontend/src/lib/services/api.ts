@@ -16,10 +16,11 @@ export class UnauthorizedError extends Error {
 
 const cities: CityOption[] = [
     { id: 'rio', label: 'Rio' },
-    { id: 'angra', label: 'Angra dos Reis' }
+    { id: 'angra', label: 'Angra dos Reis' },
+    { id: 'rioita', label: 'RioIta' }
 ];
 
-function normalizeRecords(payload: RawResponse, targetLine: string): ApiRecord[] {
+function normalizeRecords(payload: RawResponse, targetKey: string): ApiRecord[] {
     if (Array.isArray(payload)) {
         return payload;
     }
@@ -28,10 +29,31 @@ function normalizeRecords(payload: RawResponse, targetLine: string): ApiRecord[]
         return payload.ordens;
     }
 
+    if ('positions' in payload && Array.isArray(payload.positions)) {
+        return payload.positions;
+    }
+
+    // Se for um objeto com muitas chaves (RioIta sem busca específica)
     const map = payload as Record<string, ApiRecord[]>;
-    const lineRecords = map[targetLine];
-    if (Array.isArray(lineRecords)) {
-        return lineRecords;
+    
+    // Verificar se é uma resposta do RioIta (objeto com muitas chaves numéricas)
+    const keys = Object.keys(map);
+    if (keys.length > 1 && keys.every(key => !isNaN(Number(key)))) {
+        // É uma resposta do RioIta com todas as ordens
+        const allRecords: ApiRecord[] = [];
+        for (const key of keys) {
+            const records = map[key];
+            if (Array.isArray(records)) {
+                allRecords.push(...records);
+            }
+        }
+        return allRecords;
+    }
+
+    // Caso normal: buscar pela chave específica
+    const records = map[targetKey];
+    if (Array.isArray(records)) {
+        return records;
     }
     return [];
 }
@@ -56,14 +78,19 @@ export async function login(credentials: LoginCredentials): Promise<AuthResponse
     return response.json();
 }
 
-export async function fetchRouteData(city: string, linha: string, token: string): Promise<ApiRecord[]> {
+export async function fetchRouteData(city: string, searchValue: string, token: string): Promise<ApiRecord[]> {
+    // RioIta usa 'ordem' como parâmetro de busca, outros usam 'linha'
+    const bodyParam = city === 'rioita' 
+        ? { ordem: searchValue }
+        : { linha: searchValue };
+
     const response = await fetch(`${BACKEND_BASE_URL}/${city}_onibus`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ linha })
+        body: JSON.stringify(bodyParam)
     });
 
     if (response.status === 401) {
@@ -76,7 +103,7 @@ export async function fetchRouteData(city: string, linha: string, token: string)
     }
 
     const payload: RawResponse = await response.json();
-    return normalizeRecords(payload, linha);
+    return normalizeRecords(payload, searchValue);
 }
 
 export async function fetchStats(token: string): Promise<StatsResponse> {
