@@ -7,6 +7,8 @@ const { loadLatestRioOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSent
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
 const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
 const { getRioItaOnibus, getLastPositions: getRioItaLastPositions, replaceRioItaOnibusSnapshot } = require('./stores/rioItaStore');
+const { getCompanyVehicles: getGtfsVehicles, getLineLastPositions: getGtfsLineLastPositions, getStoreStatus: getGtfsVehiclesStatus } = require('./stores/gtfsVehiclesStore');
+const { getCompanyRoutes: getGtfsRoutes, getStoreStatus: getGtfsRoutesStatus, getLoadedCompanies: getGtfsLoadedCompanies } = require('./stores/gtfsRoutesStore');
 const { resolveRioTimestamp, resolveAngraTimestamp, summarizeLines } = require('./utils/stats');
 const { loadItinerarioIntoMemory } = require('./stores/itinerarioStore');
 const { startScheduler, stopScheduler } = require('./jobs');
@@ -134,6 +136,42 @@ router.post('/rioita_onibus', (req, res) => {
     }
 
     return res.json(getRioItaOnibus());
+});
+
+// GTFS-RT endpoints
+router.get('/gtfs/companies', (req, res) => {
+    const companies = getGtfsLoadedCompanies();
+    return res.json({ companies });
+});
+
+router.get('/gtfs/status', (req, res) => {
+    return res.json({
+        routes: getGtfsRoutesStatus(),
+        vehicles: getGtfsVehiclesStatus()
+    });
+});
+
+router.post('/gtfs_onibus', (req, res) => {
+    const { empresa, linha } = req.body || {};
+
+    if (!empresa || String(empresa).trim() === '') {
+        return res.status(400).json({ error: 'Parâmetro empresa é obrigatório' });
+    }
+
+    const companyKey = String(empresa).toUpperCase();
+
+    if (linha != null && String(linha).trim() !== '') {
+        const positions = getGtfsLineLastPositions(companyKey, linha);
+        return res.json({ empresa: companyKey, linha: String(linha), positions });
+    }
+
+    return res.json({ empresa: companyKey, data: getGtfsVehicles(companyKey) });
+});
+
+router.get('/gtfs/routes/:empresa', (req, res) => {
+    const empresa = req.params.empresa.toUpperCase();
+    const routes = getGtfsRoutes(empresa);
+    return res.json({ empresa, routes });
 });
 
 // Job Stats endpoints

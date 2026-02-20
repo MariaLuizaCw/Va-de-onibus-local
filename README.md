@@ -15,7 +15,10 @@ cd Va-de-onibus-local
 
 ### 2. Configuração das Variáveis de Ambiente
 
-O arquivo `.env` fornecido já contém as configurações principais. Verifique e ajuste se necessário e correlacione com o docker-compose.yml. Observe principalmente as portas em que os serviços serão levantados e as credenciais do banco de dados fornecidadas para o serviço do backend. 
+O arquivo `.env` fornecido já contém as configurações principais. Verifique e ajuste se necessário e correlacione com o docker-compose.yml. Observe principalmente as portas em que os serviços serão levantados e as credenciais do banco de dados fornecidadas para o serviço do backend.
+
+**Variáveis GTFS-RT:**
+- `GTFSRTURL`: URL base da API GTFS-RT (ex: `http://localhost:3333` ou `https://seu-servidor-gtfs.com`) 
 
 
 ### 3. Importação das Functions do Banco

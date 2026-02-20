@@ -3,6 +3,10 @@
 # Túnel Banco
 nohup ssh -f -N -R 5434:localhost:5434 marialuiza@galeao.cos.ufrj.br >> /dev/null 2>&1 &
 
+# Tunel aplicação gtfs
+nohup ssh -f -N -R 3333:localhost:3333 marialuiza@galeao.cos.ufrj.br >> /dev/null 2>&1 &
+
+
 # Importar functions e tabelas
 ./scripts/apply-functions.sh container
 

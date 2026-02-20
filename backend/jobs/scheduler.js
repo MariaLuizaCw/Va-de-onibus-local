@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { fetchRioGPSData } = require('../fetchers/rioFetcher');
 const { fetchAngraGPSData, fetchCircularLines } = require('../fetchers/angraFetcher');
 const { fetchRioItaGPSData } = require('../fetchers/rioItaFetcher');
+const { fetchGtfsRoutesData, fetchGtfsGPSData } = require('../fetchers/gtfsFetcher');
 const { syncRioSnapshot, syncAngraSnapshot, syncRioItaSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport, cleanupProximityEvents, cleanupHistoricoViagens, processarViagensRio } = require('../database/index');
 const { getRioOnibus, replaceRioOnibusSnapshot } = require('../stores/rioOnibusStore');
 const { getAngraOnibus, replaceAngraOnibusSnapshot } = require('../stores/angraOnibusStore');
@@ -25,7 +26,9 @@ const handlers = {
     syncRioItaSnapshot: () => syncRioItaSnapshot(getRioItaOnibus, replaceRioItaOnibusSnapshot),
     deleteOldJobExecutions,
     cleanupProximityEvents,
-    cleanupHistoricoViagens
+    cleanupHistoricoViagens,
+    fetchGtfsRoutesData: (data = {}) => fetchGtfsRoutesData(data),
+    fetchGtfsGPSData: (data = {}) => fetchGtfsGPSData(data)
 };
 
 function formatDuration(ms) {
