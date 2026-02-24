@@ -40,7 +40,7 @@ BEGIN
             ST_SetSRID(ST_MakePoint(p_end_lon, p_end_lat), 4326)::geography
         ) as dist_total
     FROM itinerario i
-    WHERE i.numero_linha = p_numero_linha
+    WHERE i.numero_linha = SPLIT_PART(p_numero_linha, '.', 1)
     AND (
         ST_Distance(
             ST_StartPoint(i.the_geom)::geography,
@@ -150,7 +150,7 @@ BEGIN
         -- Expande o JSON em linhas com índice
         SELECT 
             (row_number() OVER ())::INTEGER as idx,
-            (r->>'numeroLinha')::TEXT as numero_linha,
+            SPLIT_PART((r->>'numeroLinha')::TEXT, '.', 1) as numero_linha,
             (r->'startCoord'->>'lon')::NUMERIC as start_lon,
             (r->'startCoord'->>'lat')::NUMERIC as start_lat,
             (r->'endCoord'->>'lon')::NUMERIC as end_lon,
