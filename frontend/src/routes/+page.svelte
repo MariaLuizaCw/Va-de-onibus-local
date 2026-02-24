@@ -14,7 +14,7 @@
     import DatePicker from '$lib/components/DatePicker.svelte';
 
     const store = appStore;
-    const { setCity, setLine, login, logout, fetchRoute, loadStats } = store;
+    const { setCity, setLine, login, logout, fetchRoute, loadStats, loadGtfsCompanies } = store;
 
     // Configuração de retenção de logs (do .env ou 90 dias por padrão)
     const JOB_LOG_RETENTION_DAYS = Number(import.meta.env.PUBLIC_JOB_LOG_RETENTION_DAYS) || 90;
@@ -39,11 +39,20 @@
         ? timeline.filter(t => t.jobName === selectedSubtask.jobName)
         : timeline;
 
-    $: currentCityStats = $store.stats 
+    $: currentCityStats = $store.stats && !$store.isGtfsSource
         ? ($store.city === 'rio' ? $store.stats.rio : ($store.city === 'angra' ? $store.stats.angra : null)) 
         : null;
-    $: cityLabel = $store.city === 'rio' ? 'Rio de Janeiro' : ($store.city === 'angra' ? 'Angra dos Reis' : 'RioIta');
+    $: cityLabel = $store.isGtfsSource 
+        ? $store.city.toUpperCase() 
+        : ($store.city === 'rio' ? 'Rio de Janeiro' : ($store.city === 'angra' ? 'Angra dos Reis' : 'RioIta'));
     $: searchFieldLabel = $store.city === 'rioita' ? 'Ordem' : 'Linha';
+    $: selectorLabel = $store.isGtfsSource ? 'Empresa' : 'Município';
+    
+    // Combinar cidades com empresas GTFS para o seletor
+    $: allOptions = [
+        ...cities,
+        ...$store.gtfsCompanies.map(c => ({ id: c, label: `${c} (GTFS)` }))
+    ];
 
     $: if ($store.authToken && !$store.stats && !$store.statsLoading) {
         loadStats();
@@ -67,6 +76,8 @@
             availableDates = generateAvailableDates();
             loadJobStats();
             loadJobsConfig();
+            // Carregar empresas GTFS disponíveis (requer autenticação)
+            loadGtfsCompanies();
         }
     });
 
@@ -301,24 +312,27 @@
         {:else}
             <!-- Routes Explorer -->
             <div class="routes-dashboard">
-                <StatsPanel stats={currentCityStats} loading={$store.statsLoading} cityLabel={cityLabel} />
+                {#if !$store.isGtfsSource}
+                    <StatsPanel stats={currentCityStats} loading={$store.statsLoading} cityLabel={cityLabel} />
+                {/if}
 
                 <section class="hero">
                     <div>
                         <p class="eyebrow">Dashboard API</p>
                         <h1>Explore rotas do backend em tempo real</h1>
                         <p class="lead">
-                            Escolha o município, informe a linha pesquisada e visualize instantaneamente os dados retornados pela API.
+                            Escolha o município ou empresa GTFS, informe a linha pesquisada e visualize instantaneamente os dados retornados pela API.
                         </p>
                     </div>
 
                     <RouteFilter
-                        {cities}
+                        cities={allOptions}
                         selectedCity={$store.city}
                         linha={$store.linha}
                         loading={$store.loading}
                         statusMessage={$store.statusMessage}
                         errorMessage={$store.errorMessage}
+                        selectorLabel="Município ou Empresa"
                         on:submit={() => fetchRoute()}
                         on:citychange={event => setCity(event.detail)}
                         on:linechange={event => setLine(event.detail)}
@@ -338,7 +352,7 @@
                             {/if}
                         </div>
 
-                        {#if $store.selectedLineStats}
+                        {#if $store.selectedLineStats && !$store.isGtfsSource}
                             <div class="line-stats-inline">
                                 <div class="stat">
                                     <span class="label">Última atualização</span>
@@ -359,6 +373,21 @@
                                 <div class="stat">
                                     <span class="label">Ordens ativas</span>
                                     <span class="value">{$store.selectedLineStats.activeOrders} / {$store.selectedLineStats.totalOrders}</span>
+                                </div>
+                            </div>
+                        {:else if $store.isGtfsSource && $store.tableData.length > 0}
+                            <div class="line-stats-inline">
+                                <div class="stat">
+                                    <span class="label">Fonte</span>
+                                    <span class="value">GTFS-RT</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Veículos</span>
+                                    <span class="value">{$store.tableData.length}</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Empresa</span>
+                                    <span class="value">{$store.city.toUpperCase()}</span>
                                 </div>
                             </div>
                         {/if}

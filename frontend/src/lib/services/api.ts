@@ -20,6 +20,51 @@ const cities: CityOption[] = [
     { id: 'rioita', label: 'RioIta' }
 ];
 
+// GTFS Companies API
+export async function fetchGtfsCompanies(token: string): Promise<string[]> {
+    const response = await fetch(`${BACKEND_BASE_URL}/gtfs/companies`, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${token}`
+        }
+    });
+    
+    if (response.status === 401) {
+        throw new UnauthorizedError();
+    }
+    
+    if (!response.ok) {
+        const message = await buildErrorMessage(response);
+        throw new Error(message);
+    }
+    
+    const data = await response.json();
+    return data.companies || [];
+}
+
+export async function fetchGtfsRouteData(empresa: string, linha: string, token: string): Promise<ApiRecord[]> {
+    const response = await fetch(`${BACKEND_BASE_URL}/gtfs_onibus`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ empresa, linha })
+    });
+
+    if (response.status === 401) {
+        throw new UnauthorizedError();
+    }
+
+    if (!response.ok) {
+        const message = await buildErrorMessage(response);
+        throw new Error(message);
+    }
+
+    const payload = await response.json();
+    return payload.positions || [];
+}
+
 function normalizeRecords(payload: RawResponse, targetKey: string): ApiRecord[] {
     if (Array.isArray(payload)) {
         return payload;

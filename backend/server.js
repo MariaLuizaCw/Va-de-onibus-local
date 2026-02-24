@@ -93,6 +93,19 @@ router.post('/auth/login', (req, res) => {
 
 router.use(authenticateToken);
 
+// GTFS-RT endpoints (autenticados)
+router.get('/gtfs/companies', (req, res) => {
+    const companies = getGtfsLoadedCompanies();
+    return res.json({ companies });
+});
+
+router.get('/gtfs/status', (req, res) => {
+    return res.json({
+        routes: getGtfsRoutesStatus(),
+        vehicles: getGtfsVehiclesStatus()
+    });
+});
+
 router.get('/stats/lines', (req, res) => {
     const rioStats = summarizeLines(getRioOnibus(), resolveRioTimestamp);
     const angraStats = summarizeLines(getAngraOnibus(), resolveAngraTimestamp);
@@ -138,19 +151,7 @@ router.post('/rioita_onibus', (req, res) => {
     return res.json(getRioItaOnibus());
 });
 
-// GTFS-RT endpoints
-router.get('/gtfs/companies', (req, res) => {
-    const companies = getGtfsLoadedCompanies();
-    return res.json({ companies });
-});
-
-router.get('/gtfs/status', (req, res) => {
-    return res.json({
-        routes: getGtfsRoutesStatus(),
-        vehicles: getGtfsVehiclesStatus()
-    });
-});
-
+// GTFS-RT endpoint (autenticado)
 router.post('/gtfs_onibus', (req, res) => {
     const { empresa, linha } = req.body || {};
 

@@ -5,6 +5,8 @@ import {
     login as loginService,
     fetchRouteData,
     fetchStats,
+    fetchGtfsCompanies,
+    fetchGtfsRouteData,
     UnauthorizedError,
     TOKEN_STORAGE_KEY,
     cities as cityOptions
@@ -28,6 +30,10 @@ type AppState = {
     stats: { rio: CityStats; angra: CityStats } | null;
     statsLoading: boolean;
     selectedLineStats: LineStats | null;
+    // GTFS
+    gtfsCompanies: string[];
+    gtfsCompaniesLoading: boolean;
+    isGtfsSource: boolean;
 };
 
 const initialToken = canUseBrowser ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
@@ -38,7 +44,7 @@ const initialState: AppState = {
     lastSearchedLine: '',
     tableData: [],
     loading: false,
-    statusMessage: 'Selecione a cidade e informe a linha para ver os registros.',
+    statusMessage: 'Selecione a cidade/empresa e informe a linha para ver os registros.',
     errorMessage: null,
     lastFetched: null,
     authToken: initialToken,
@@ -47,19 +53,29 @@ const initialState: AppState = {
     preferredSortFields: ['datahora'],
     stats: null,
     statsLoading: false,
-    selectedLineStats: null
+    selectedLineStats: null,
+    // GTFS
+    gtfsCompanies: [],
+    gtfsCompaniesLoading: false,
+    isGtfsSource: false
 };
 
 function createAppStore() {
     const store = writable<AppState>(initialState);
 
     function setCity(value: string) {
+        // Verificar se é uma empresa GTFS
+        const state = get(store);
+        const isGtfs = state.gtfsCompanies.includes(value.toUpperCase());
+        
         store.update((s) => ({
             ...s,
             city: value,
-            preferredSortFields: value === 'rio' ? ['datahora'] : ['event_date', 'EventDate'],
+            isGtfsSource: isGtfs,
+            preferredSortFields: isGtfs ? ['datahora'] : (value === 'rio' ? ['datahora'] : ['event_date', 'EventDate']),
             statusMessage: 'Informe a linha desejada para iniciar a busca.',
-            tableData: []
+            tableData: [],
+            selectedLineStats: null
         }));
     }
 
@@ -138,13 +154,27 @@ function createAppStore() {
         }));
 
         try {
-            const [records, stats] = await Promise.all([
-                fetchRouteData(state.city, trimmedLine, state.authToken),
-                fetchStats(state.authToken)
-            ]);
+            let records: ApiRecord[];
+            let lineStats: LineStats | null = null;
+            let stats = state.stats;
+
+            // Verificar se é uma empresa GTFS
+            if (state.isGtfsSource) {
+                // Buscar dados GTFS
+                records = await fetchGtfsRouteData(state.city, trimmedLine, state.authToken);
+            } else {
+                // Buscar dados normais (Rio, Angra, RioIta)
+                const [routeRecords, fetchedStats] = await Promise.all([
+                    fetchRouteData(state.city, trimmedLine, state.authToken),
+                    fetchStats(state.authToken)
+                ]);
+                records = routeRecords;
+                stats = fetchedStats;
+                const cityStats = state.city === 'rio' ? stats.rio : stats.angra;
+                lineStats = cityStats.lines.find((l) => l.linha === trimmedLine) || null;
+            }
+
             const timestamp = new Date().toLocaleTimeString();
-            const cityStats = state.city === 'rio' ? stats.rio : stats.angra;
-            const lineStats = cityStats.lines.find((l) => l.linha === trimmedLine) || null;
             store.update((s) => ({
                 ...s,
                 tableData: records,
@@ -204,6 +234,24 @@ function createAppStore() {
         store.update((s) => ({ ...s, selectedLineStats: lineStats }));
     }
 
+    async function loadGtfsCompanies() {
+        const state = get(store);
+        if (!state.authToken) return;
+        
+        store.update((s) => ({ ...s, gtfsCompaniesLoading: true }));
+        try {
+            const companies = await fetchGtfsCompanies(state.authToken);
+            store.update((s) => ({ ...s, gtfsCompanies: companies, gtfsCompaniesLoading: false }));
+        } catch (error) {
+            if (error instanceof UnauthorizedError) {
+                logout(error.message);
+                return;
+            }
+            console.error('Erro ao carregar empresas GTFS:', error);
+            store.update((s) => ({ ...s, gtfsCompanies: [], gtfsCompaniesLoading: false }));
+        }
+    }
+
     return {
         subscribe: store.subscribe,
         setCity,
@@ -212,7 +260,8 @@ function createAppStore() {
         logout,
         fetchRoute,
         loadStats,
-        selectLineStats
+        selectLineStats,
+        loadGtfsCompanies
     };
 }
 

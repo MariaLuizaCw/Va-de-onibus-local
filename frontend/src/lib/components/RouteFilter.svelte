@@ -9,6 +9,7 @@
     export let loading = false;
     export let statusMessage = '';
     export let errorMessage: string | null = null;
+    export let selectorLabel = 'Município ou Empresa';
 
     const dispatch = createEventDispatcher<{
         submit: void;
@@ -34,7 +35,7 @@
 
 <form class="filter-panel" on:submit={handleSubmit}>
     <label>
-        Cidade
+        {selectorLabel}
         <select bind:value={selectedCity} on:change={handleCityChange}>
             {#each cities as option}
                 <option value={option.id}>{option.label}</option>
