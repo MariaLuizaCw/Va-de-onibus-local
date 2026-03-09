@@ -259,6 +259,78 @@ async function cleanupHistoricoViagens() {
     }
 }
 
+async function saveRioGpsApiHistory(records) {
+    if (!records || records.length === 0) return;
+    
+    const startedAt = new Date();
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
+    let totalInserted = 0;
+
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+
+        // Salvar dados brutos exatamente como chegam da API
+        const recordsJson = batch.map(record => ({
+            ordem: record.ordem,
+            latitude: record.latitude,
+            longitude: record.longitude,
+            datahora: record.datahora,
+            velocidade: record.velocidade,
+            linha: record.linha,
+            datahoraenvio: record.datahoraenvio,
+            datahoraservidor: record.datahoraservidor
+        }));
+
+        try {
+            const result = await dbPool.query(
+                'SELECT * FROM fn_insert_rio_gps_api_history($1::jsonb)',
+                [JSON.stringify(recordsJson)]
+            );
+            const insertedCount = result.rows.length > 0 ? (result.rows[0].inserted_count || 0) : 0;
+            totalInserted += insertedCount;
+        } catch (err) {
+            console.error('[Rio][gps_api_history] Error inserting raw history:', err.message);
+        }
+    }
+
+    // Log da subtask
+    const finishedAt = new Date();
+    const durationMs = finishedAt - startedAt;
+    
+    await logJobExecution({
+        jobName: 'saveRioGpsApiHistory',
+        parentJob: 'rio-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs,
+        status: 'success',
+        infoMessage: `${totalInserted} registros brutos salvos no histórico`
+    });
+
+    return totalInserted;
+}
+
+async function cleanupRioGpsApiHistory() {
+    const retentionDays = Number(process.env.RIO_GPS_API_HISTORY_RETENTION_DAYS) || 7;
+    
+    try {
+        const result = await dbPool.query(
+            'SELECT * FROM fn_cleanup_rio_gps_api_history($1::integer)',
+            [retentionDays]
+        );
+        
+        const deletedCount = result.rows.length > 0 ? (result.rows[0].deleted_count || 0) : 0;
+        
+        console.log(`[Cleanup] Rio GPS API History: ${deletedCount} registros removidos (retenção: ${retentionDays} dias)`);
+        
+        return deletedCount;
+    } catch (error) {
+        console.error('[Cleanup] Error cleaning Rio GPS API history:', error.message);
+        throw error;
+    }
+}
+
 async function processarViagensRio(records) {
     if (!records || records.length === 0) return;
     
@@ -322,4 +394,6 @@ module.exports = {
     processarViagensRio,
     cleanupProximityEvents,
     cleanupHistoricoViagens,
+    saveRioGpsApiHistory,
+    cleanupRioGpsApiHistory,
 };

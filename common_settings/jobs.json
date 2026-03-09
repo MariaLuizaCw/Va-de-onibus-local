@@ -1,22 +1,59 @@
 {
   "jobs": [
     {
-      "name": "gtfs-routes-refresh",
-      "handler": "fetchGtfsRoutesData",
-      "cron": "0 4 * * *",
-      "description": "Atualiza rotas GTFS-RT de todas as empresas 1 vez por dia às 4h",
+      "name": "itinerario-refresh",
+      "handler": "loadItinerarioIntoMemory",
+      "cron": "0 */6 * * *",
+      "description": "Atualiza cache do itinerário a cada 6 horas",
       "runOnStartup": true
     },
     {
-      "name": "gtfs-gps-fetch",
-      "handler": "fetchGtfsGPSData",
+      "name": "rio-gps-fetch",
+      "handler": "fetchRioGPSData",
       "cron": "0 * * * * *",
-      "description": "Busca dados GPS GTFS-RT de todas as empresas a cada 1 minuto",
+      "description": "Busca dados GPS do Rio a cada 1 minuto e atualiza as tabelas",
       "options": {
+        "saveToGpsProximidadeTerminalEvento": true,
+        "saveToGpsSentido": true,
         "updateInMemoryStore": true,
-        "identificarSentido": true,
-        "saveToGpsSentido": true
+        "processarViagens": true,
+        "saveRawHistory": true
       }
+    },
+    {
+      "name": "cleanup-job-logs",
+      "handler": "deleteOldJobExecutions",
+      "cron": "0 3 * * *",
+      "description": "Remove logs de jobs com mais de 30 dias diariamente às 3h",
+      "runOnStartup": true
+    },
+    {
+      "name": "rio-snapshot",
+      "handler": "syncRioSnapshot",
+      "cron": "*/3 * * * *",
+      "description": "Carrega snapshot do Rio no startup e salva a cada 3 minutos",
+      "runOnStartup": true
+    },
+    {
+      "name": "cleanup-proximity-events",
+      "handler": "cleanupProximityEvents",
+      "cron": "0 * * * *",
+      "description": "Remove eventos de proximidade antigos cada 1 hora",
+      "runOnStartup": true
+    },
+    {
+      "name": "cleanup-historico-viagens",
+      "handler": "cleanupHistoricoViagens",
+      "cron": "0 2 * * *",
+      "description": "Remove histórico de viagens antigos (mantém 1 mês) - executa diariamente às 2h",
+      "runOnStartup": false
+    },
+    {
+      "name": "cleanup-rio-gps-api-history",
+      "handler": "cleanupRioGpsApiHistory",
+      "cron": "0 * * * *",
+      "description": "Remove histórico bruto da API Rio GPS com mais de 7 dias - executa a cada 1 hora",
+      "runOnStartup": false
     }
   ]
 }

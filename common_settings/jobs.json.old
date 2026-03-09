@@ -82,6 +82,24 @@
         "saveToGpsSentido": true,
         "maxDistance": 300
       }
+    },
+       {
+      "name": "gtfs-routes-refresh",
+      "handler": "fetchGtfsRoutesData",
+      "cron": "0 4 * * *",
+      "description": "Atualiza rotas GTFS-RT de todas as empresas 1 vez por dia às 4h",
+      "runOnStartup": true
+    },
+    {
+      "name": "gtfs-gps-fetch",
+      "handler": "fetchGtfsGPSData",
+      "cron": "0 * * * * *",
+      "description": "Busca dados GPS GTFS-RT de todas as empresas a cada 1 minuto",
+      "options": {
+        "updateInMemoryStore": true,
+        "identificarSentido": true,
+        "saveToGpsSentido": true
+      }
     }
   ]
 }

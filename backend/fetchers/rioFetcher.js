@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio } = require('../database/index');
+const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio, saveRioGpsApiHistory } = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -40,11 +40,16 @@ async function fetchRioGPSData(options = {}) {
 
         const records = response.data;
         
+        // Salvar histórico bruto ANTES de qualquer transformação (incluindo deduplicação)
+        if (options.saveRawHistory) {
+            await saveRioGpsApiHistory(records)
+                .then(() => console.log(`[Rio][gps_api_history] Sucesso: ${records.length} registros brutos salvos`))
+                .catch(err => console.error('[Rio][gps_api_history] Falha:', err.message));
+        }
+        
         // Deduplicar: manter apenas o registro mais recente de cada ordem
         // 22k registros → ~3k registros únicos
         const latestRecords = deduplicateByOrdem(records);
-        
-  
 
         // gps_proximidade_terminal_evento: recebe apenas registros únicos para análise
         if (options.saveToGpsProximidadeTerminalEvento) {

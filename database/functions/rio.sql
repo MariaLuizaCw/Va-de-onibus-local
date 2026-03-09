@@ -578,6 +578,82 @@ END;
 $$;
 
 
+-- -----------------------------------------------------------------------------
+-- fn_insert_rio_gps_api_history
+-- Insere registros brutos da API Rio GPS em batch
+-- Dados salvos exatamente como chegam da API, antes de qualquer transformação
+-- Usado por: rioFetcher.js -> saveRawHistory
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_insert_rio_gps_api_history(
+    p_records jsonb
+)
+RETURNS TABLE (
+    inserted_count bigint
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_inserted_count bigint;
+BEGIN
+    INSERT INTO rio_gps_api_history (
+        ordem,
+        latitude,
+        longitude,
+        datahora,
+        velocidade,
+        linha,
+        datahoraenvio,
+        datahoraservidor
+    )
+    SELECT
+        (r.value->>'ordem')::text,
+        (r.value->>'latitude')::text,
+        (r.value->>'longitude')::text,
+        (r.value->>'datahora')::bigint,
+        (r.value->>'velocidade')::integer,
+        (r.value->>'linha')::text,
+        (r.value->>'datahoraenvio')::bigint,
+        (r.value->>'datahoraservidor')::bigint
+    FROM jsonb_array_elements(p_records) r;
+    
+    GET DIAGNOSTICS v_inserted_count = ROW_COUNT;
+    
+    RETURN QUERY SELECT v_inserted_count::bigint;
+END;
+$$;
+
+
+-- -----------------------------------------------------------------------------
+-- fn_cleanup_rio_gps_api_history
+-- Remove registros de histórico bruto mais antigos que 7 dias
+-- Usado por: scheduler.js -> cleanupRioGpsApiHistory job
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_cleanup_rio_gps_api_history(
+    p_retention_days integer DEFAULT 7
+)
+RETURNS TABLE (
+    deleted_count bigint,
+    retention_days integer,
+    cleanup_timestamp timestamp
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_deleted_count bigint;
+BEGIN
+    DELETE FROM rio_gps_api_history
+    WHERE created_at < NOW() - (p_retention_days || ' days')::INTERVAL;
+    
+    GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
+    
+    RETURN QUERY SELECT 
+        v_deleted_count::bigint,
+        p_retention_days::integer,
+        NOW()::timestamp;
+END;
+$$;
+
+
 -- =============================================================================
 -- FIM DO SCRIPT
 -- =============================================================================
