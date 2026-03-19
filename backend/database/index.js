@@ -1,5 +1,5 @@
 const { dbPool } = require('./pool');
-const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio, cleanupProximityEvents, cleanupHistoricoViagens, saveRioGpsApiHistory, cleanupRioGpsApiHistory } = require('./rio');
+const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio, cleanupProximityEvents, cleanupHistoricoViagens, saveRioGpsApiHistory, cleanupRioGpsApiHistory, saveRioToGpsUltimaPassagem } = require('./rio');
 const { enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('./angra');
 const { enrichGtfsRecordsWithSentido, saveGtfsToGpsSentido, identificarSentido, enrichVehicles } = require('./gtfs');
 const { 
@@ -25,6 +25,7 @@ module.exports = {
     cleanupHistoricoViagens,
     saveRioGpsApiHistory,
     cleanupRioGpsApiHistory,
+    saveRioToGpsUltimaPassagem,
     enrichAngraRecordsWithSentido,
     saveAngraToGpsSentido,
     enrichGtfsRecordsWithSentido,

@@ -74,63 +74,46 @@ $$;
 
 
 -- -----------------------------------------------------------------------------
--- fn_enrich_gps_batch_with_sentido_json
--- Infere o sentido atual de cada ônibus combinando:
--- - Evidência temporal (proximidade com terminais)
--- - Coerência espacial atual (projeção do GPS na trajetória)
--- Usado por: rio.js -> enrichRecordsWithSentido
+-- gps_ultima_passagem
+-- Tabela que armazena a última passagem identificada de cada ônibus por linha
+-- Chave primária composta: (ordem, linha)
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_enrich_gps_batch_with_sentido_json(
+-- CREATE TABLE IF NOT EXISTS gps_ultima_passagem (
+--     ordem TEXT NOT NULL,
+--     linha TEXT NOT NULL,
+--     label_ultima_passagem TEXT,
+--     datahora_atualizacao TIMESTAMP WITH TIME ZONE NOT NULL,
+--     datahora_identificacao TIMESTAMP WITH TIME ZONE,
+--     PRIMARY KEY (ordem, linha)
+-- );
+
+-- -----------------------------------------------------------------------------
+-- fn_atualizar_ultima_passagem
+-- Atualiza a tabela gps_ultima_passagem com base na regra B:
+-- - Ônibus que permaneceu >= 8 minutos a <= 150m do início de um itinerário
+-- - Carrega o sentido correspondente no label_ultima_passagem
+-- Usado por: rioFetcher.js -> processamento de última passagem
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION fn_atualizar_ultima_passagem(
     p_points jsonb,
-    p_max_snap_distance_meters numeric DEFAULT 300,
-    p_terminal_passage_distance_meters numeric DEFAULT 20,
-    p_terminal_proximity_distance_meters numeric DEFAULT 100,
-    p_proximity_window_minutes numeric DEFAULT 15,
-    p_proximity_min_duration_minutes numeric DEFAULT 10
+    p_terminal_proximity_distance_meters numeric DEFAULT 150,
+    p_proximity_window_minutes numeric DEFAULT 30,
+    p_proximity_min_duration_minutes numeric DEFAULT 8
 )
-RETURNS TABLE (
-    ordem text,
-    linha text,
-    sentido text,
-    itinerario_id integer,
-    route_name text,
-    dist_m numeric,
-    metodo_inferencia text
-)
+RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    RETURN QUERY
     WITH pts AS (
         SELECT
             (r.value->>'ordem')::text AS ordem,
             (r.value->>'linha')::text AS linha,
-            (r.value->>'lon')::double precision AS lon,
-            (r.value->>'lat')::double precision AS lat
+            (r.value->>'datahora')::timestamp with time zone AS datahora
         FROM jsonb_array_elements(p_points) r
     ),
     
     -- =========================================================================
-    -- REGRA A: Passagem pelo terminal (distância <= 20m)
-    -- Busca o registro mais recente onde o ônibus passou a <= 20m do terminal
-    -- =========================================================================
-    regra_a AS (
-        SELECT DISTINCT ON (pts.ordem)
-            pts.ordem,
-            pts.linha,
-            e.itinerario_id,
-            e.sentido,
-            e.datahora AS timestamp_evidencia
-        FROM pts
-        JOIN public.gps_proximidade_terminal_evento e
-            ON e.ordem = pts.ordem
-            AND e.linha = pts.linha
-            AND e.distancia_metros <= p_terminal_passage_distance_meters
-        ORDER BY pts.ordem, e.datahora DESC
-    ),
-    
-    -- =========================================================================
-    -- REGRA B: Permanência próxima ao terminal (100m por >= 10 min em janela de 20 min)
+    -- REGRA B: Permanência próxima ao terminal (150m por >= 8 min em janela de 30 min)
     -- =========================================================================
     regra_b_registros AS (
         SELECT
@@ -164,146 +147,62 @@ BEGIN
             rbd.max_datahora,
             MIN(rb.datahora) AS min_datahora_janela
         FROM regra_b_max_datahora rbd
-        JOIN regra_b_registros rb ON rb.ordem = rbd.ordem AND rb.linha = rbd.linha AND rb.itinerario_id = rbd.itinerario_id AND rb.sentido = rbd.sentido
+        JOIN regra_b_registros rb 
+            ON rb.ordem = rbd.ordem 
+            AND rb.linha = rbd.linha 
+            AND rb.itinerario_id = rbd.itinerario_id 
+            AND rb.sentido = rbd.sentido
         WHERE rb.datahora >= rbd.max_datahora - (p_proximity_window_minutes || ' minutes')::INTERVAL
         GROUP BY rbd.ordem, rbd.linha, rbd.itinerario_id, rbd.sentido, rbd.max_datahora
     ),
     regra_b AS (
-        SELECT DISTINCT ON (rbj.ordem)
+        SELECT DISTINCT ON (rbj.ordem, rbj.linha)
             rbj.ordem,
             rbj.linha,
-            rbj.itinerario_id,
             rbj.sentido,
-            rbj.max_datahora AS timestamp_evidencia
+            rbj.max_datahora AS timestamp_identificacao
         FROM regra_b_janela rbj
         WHERE rbj.max_datahora - rbj.min_datahora_janela >= (p_proximity_min_duration_minutes || ' minutes')::INTERVAL
-        ORDER BY rbj.ordem, rbj.max_datahora DESC
+        ORDER BY rbj.ordem, rbj.linha, rbj.max_datahora DESC
     ),
     
     -- =========================================================================
-    -- CANDIDATOS: União das regras A e B, escolher o mais recente
+    -- ATUALIZAÇÃO: Todos os pontos recebidos atualizam datahora_atualizacao
+    -- Apenas os que passaram na regra B atualizam label e datahora_identificacao
     -- =========================================================================
-    candidatos AS (
-        SELECT ra.ordem, ra.linha, ra.itinerario_id, ra.sentido, ra.timestamp_evidencia, 'regra_a'::text AS origem FROM regra_a ra
-        UNION ALL
-        SELECT rb.ordem, rb.linha, rb.itinerario_id, rb.sentido, rb.timestamp_evidencia, 'regra_b'::text AS origem FROM regra_b rb
-    ),
-    candidato_escolhido AS (
-        SELECT DISTINCT ON (cand.ordem)
-            cand.ordem,
-            cand.linha,
-            cand.itinerario_id,
-            cand.sentido,
-            cand.origem
-        FROM candidatos cand
-        ORDER BY cand.ordem, cand.timestamp_evidencia DESC
-    ),
-    
-    -- =========================================================================
-    -- VALIDAÇÃO ESPACIAL: Projetar GPS na LineString do sentido preliminar
-    -- =========================================================================
-    validacao_espacial AS (
-        SELECT
-            c.ordem,
-            c.linha,
-            c.itinerario_id,
-            c.sentido,
-            c.origem,
-            i.route_name,
-            ST_Distance(
-                ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326)::geography,
-                ST_ClosestPoint(ST_SetSRID(i.the_geom, 4326), ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326))::geography
-            ) AS dist_proj
-        FROM candidato_escolhido c
-        JOIN pts ON pts.ordem = c.ordem
-        JOIN public.itinerario i ON i.id = c.itinerario_id
-    ),
-    
-    -- =========================================================================
-    -- FALLBACK ESPACIAL: Se projeção > 300m, buscar melhor sentido espacialmente
-    -- =========================================================================
-    fallback_espacial AS (
+    dados_para_upsert AS (
         SELECT
             pts.ordem,
             pts.linha,
-            i.id AS itinerario_id,
-            i.sentido,
-            i.route_name,
-            ST_Distance(
-                ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326)::geography,
-                ST_ClosestPoint(ST_SetSRID(i.the_geom, 4326), ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326))::geography
-            ) AS dist_proj
+            rb.sentido AS label_ultima_passagem,
+            pts.datahora AS datahora_atualizacao,
+            rb.timestamp_identificacao AS datahora_identificacao
         FROM pts
-        JOIN public.itinerario i
-            ON i.habilitado = true
-            AND i.numero_linha = pts.linha
-    ),
-    fallback_melhor AS (
-        SELECT DISTINCT ON (fe.ordem)
-            fe.ordem,
-            fe.linha,
-            fe.itinerario_id,
-            fe.sentido,
-            fe.route_name,
-            fe.dist_proj
-        FROM fallback_espacial fe
-        ORDER BY fe.ordem, fe.dist_proj ASC
-    ),
-    
-    -- =========================================================================
-    -- RESULTADO FINAL: Combinar validação espacial com fallback
-    -- =========================================================================
-    resultado AS (
-        SELECT
-            pts.ordem AS ordem,
-            pts.linha AS linha,
-            CASE
-                -- Sentido preliminar válido (projeção <= 300m)
-                WHEN v.dist_proj <= p_max_snap_distance_meters THEN v.sentido
-                -- Fallback válido (projeção <= 300m)
-                WHEN f.dist_proj <= p_max_snap_distance_meters THEN f.sentido
-                -- Garagem (nenhum sentido válido)
-                ELSE NULL
-            END AS sentido,
-            CASE
-                WHEN v.dist_proj <= p_max_snap_distance_meters THEN v.itinerario_id
-                WHEN f.dist_proj <= p_max_snap_distance_meters THEN f.itinerario_id
-                ELSE NULL
-            END AS itinerario_id,
-            CASE
-                WHEN v.dist_proj <= p_max_snap_distance_meters THEN v.route_name
-                WHEN f.dist_proj <= p_max_snap_distance_meters THEN f.route_name
-                ELSE NULL
-            END AS route_name,
-            CASE
-                WHEN v.dist_proj <= p_max_snap_distance_meters THEN ROUND(v.dist_proj::numeric, 1)
-                WHEN f.dist_proj <= p_max_snap_distance_meters THEN ROUND(f.dist_proj::numeric, 1)
-                ELSE NULL
-            END AS dist_m,
-            CASE
-                -- Candidato válido com validação espacial OK
-                WHEN v.dist_proj <= p_max_snap_distance_meters THEN v.origem
-                -- Candidato existia mas validação falhou, usou fallback
-                WHEN v.origem IS NOT NULL AND f.dist_proj <= p_max_snap_distance_meters THEN v.origem || '_fallback'
-                -- Sem candidato, usou apenas projeção espacial
-                WHEN v.origem IS NULL AND f.dist_proj <= p_max_snap_distance_meters THEN 'projecao'
-                -- Nenhum método funcionou (garagem)
-                ELSE NULL
-            END AS metodo_inferencia
-        FROM pts
-        LEFT JOIN validacao_espacial v ON v.ordem = pts.ordem
-        LEFT JOIN fallback_melhor f ON f.ordem = pts.ordem
+        LEFT JOIN regra_b rb ON rb.ordem = pts.ordem AND rb.linha = pts.linha
     )
     
+    INSERT INTO gps_ultima_passagem (
+        ordem,
+        linha,
+        label_ultima_passagem,
+        datahora_atualizacao,
+        datahora_identificacao
+    )
     SELECT
-        r.ordem,
-        r.linha,
-        r.sentido,
-        r.itinerario_id,
-        r.route_name,
-        r.dist_m,
-        r.metodo_inferencia
-    FROM resultado r;
+        d.ordem,
+        d.linha,
+        d.label_ultima_passagem,
+        d.datahora_atualizacao,
+        d.datahora_identificacao
+    FROM dados_para_upsert d
+    ON CONFLICT (ordem, linha) DO UPDATE SET
+        datahora_atualizacao = EXCLUDED.datahora_atualizacao,
+        -- Só atualiza label e datahora_identificacao se houver nova identificação
+        label_ultima_passagem = COALESCE(EXCLUDED.label_ultima_passagem, gps_ultima_passagem.label_ultima_passagem),
+        datahora_identificacao = CASE 
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.datahora_identificacao
+            ELSE gps_ultima_passagem.datahora_identificacao
+        END;
 END;
 $$;
 
@@ -388,7 +287,7 @@ BEGIN
         WHERE
             gs.sentido IS NOT NULL
             AND n.sentido IS NOT NULL
-            AND LOWER(gs.sentido) <> LOWER(n.sentido)
+            AND LOWER(TRIM(gs.sentido)) <> LOWER(TRIM(n.sentido))
             AND gs.sentido_itinerario_id <> n.itinerario_id
             AND NOT ST_Equals(
                 ST_StartPoint(i_ant.the_geom),

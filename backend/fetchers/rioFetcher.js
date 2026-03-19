@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio, saveRioGpsApiHistory } = require('../database/index');
+const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio, saveRioGpsApiHistory, saveRioToGpsUltimaPassagem } = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -59,10 +59,16 @@ async function fetchRioGPSData(options = {}) {
         }
         
 
-        const enrichedRecords = await enrichRecordsWithSentido(latestRecords);
-        
+        // gps_ultima_passagem: atualiza tabela de última passagem usando regra B (150m, 8min)
+        if (options.saveToGpsUltimaPassagem) {
+            await saveRioToGpsUltimaPassagem(latestRecords)
+                .then(() => console.log(`[Rio][gps_ultima_passagem] Sucesso: ${latestRecords.length} registros`))
+                .catch(err => console.error('[Rio][gps_ultima_passagem] Falha:', err.message));
+        }
+
         // processar viagens: recebe registros enriquecidos para detectar mudanças de sentido (ANTES do upsert)
         if (options.processarViagens) {
+            const enrichedRecords = await enrichRecordsWithSentido(latestRecords);
             try {
                 await processarViagensRio(enrichedRecords)
                     .then(() => console.log(`[Rio][viagens] Sucesso: ${enrichedRecords.length} registros processados`))
@@ -74,7 +80,7 @@ async function fetchRioGPSData(options = {}) {
 
         // gps_sentido: recebe apenas os mais recentes (com sentido) (DEPOIS do processamento de viagens)
         if (options.saveToGpsSentido) {
-            // Enrich apenas os registros únicos e usar retorno direto
+            const enrichedRecords = await enrichRecordsWithSentido(latestRecords);
             try {
                 await saveRioToGpsSentido(enrichedRecords)
                     .then(() => console.log(`[Rio][gps_sentido] Sucesso: ${enrichedRecords.length} registros`))

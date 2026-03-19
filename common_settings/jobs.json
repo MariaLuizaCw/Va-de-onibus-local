@@ -14,10 +14,11 @@
       "description": "Busca dados GPS do Rio a cada 1 minuto e atualiza as tabelas",
       "options": {
         "saveToGpsProximidadeTerminalEvento": true,
-        "saveToGpsSentido": true,
+        "saveToGpsSentido": false,
         "updateInMemoryStore": true,
-        "processarViagens": true,
-        "saveRawHistory": true
+        "processarViagens": false,
+        "saveRawHistory": true,
+        "saveToGpsUltimaPassagem": true
       }
     },
     {

@@ -9,8 +9,8 @@ const PROXIMITY_EVENT_RETENTION_HOURS = Number(process.env.PROXIMITY_EVENT_RETEN
 const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
 const TERMINAL_PASSAGE_DISTANCE_METERS = Number(process.env.TERMINAL_PASSAGE_DISTANCE_METERS) || 20;
 const TERMINAL_PROXIMITY_DISTANCE_METERS = Number(process.env.TERMINAL_PROXIMITY_DISTANCE_METERS) || 100;
-const PROXIMITY_WINDOW_MINUTES = Number(process.env.PROXIMITY_WINDOW_MINUTES) || 15;
-const PROXIMITY_MIN_DURATION_MINUTES = Number(process.env.PROXIMITY_MIN_DURATION_MINUTES) || 10;
+const PROXIMITY_WINDOW_MINUTES = Number(process.env.PROXIMITY_WINDOW_MINUTES) || 30;
+const PROXIMITY_MIN_DURATION_MINUTES = Number(process.env.PROXIMITY_MIN_DURATION_MINUTES) || 8;
 
 async function enrichRecordsWithSentido(records) {
     if (!records || records.length === 0) return [];
@@ -387,6 +387,67 @@ async function processarViagensRio(records) {
     return totalProcessed;
 }
 
+const ULTIMA_PASSAGEM_PROXIMITY_METERS = Number(process.env.ULTIMA_PASSAGEM_PROXIMITY_METERS) || 150;
+const ULTIMA_PASSAGEM_WINDOW_MINUTES = Number(process.env.ULTIMA_PASSAGEM_WINDOW_MINUTES) || 30;
+const ULTIMA_PASSAGEM_MIN_DURATION_MINUTES = Number(process.env.ULTIMA_PASSAGEM_MIN_DURATION_MINUTES) || 8;
+
+async function saveRioToGpsUltimaPassagem(records) {
+    if (!records || records.length === 0) return;
+    
+    const startedAt = new Date();
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
+    let totalProcessed = 0;
+
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+
+        const pointsJson = batch.map(record => {
+            const datahoraMs = Number(record.datahora);
+            const datahoraTimestamp = Number.isFinite(datahoraMs)
+                ? formatDateInTimeZone(new Date(datahoraMs))
+                : null;
+
+            return {
+                ordem: String(record.ordem),
+                linha: String(record.linha),
+                datahora: datahoraTimestamp
+            };
+        });
+
+        try {
+            await dbPool.query(
+                'SELECT fn_atualizar_ultima_passagem($1::jsonb, $2, $3, $4)',
+                [
+                    JSON.stringify(pointsJson),
+                    ULTIMA_PASSAGEM_PROXIMITY_METERS,
+                    ULTIMA_PASSAGEM_WINDOW_MINUTES,
+                    ULTIMA_PASSAGEM_MIN_DURATION_MINUTES
+                ]
+            );
+            totalProcessed += batch.length;
+        } catch (err) {
+            console.error('[Rio][gps_ultima_passagem] Error updating records:', err.message);
+        }
+    }
+
+    // Log da subtask
+    const finishedAt = new Date();
+    const durationMs = finishedAt - startedAt;
+    
+    await logJobExecution({
+        jobName: 'saveRioToGpsUltimaPassagem',
+        parentJob: 'rio-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs,
+        status: 'success',
+        infoMessage: `${totalProcessed} registros processados para última passagem`
+    });
+
+    return totalProcessed;
+}
+
 module.exports = {
     enrichRecordsWithSentido,
     saveRioToGpsSentido,
@@ -396,4 +457,5 @@ module.exports = {
     cleanupHistoricoViagens,
     saveRioGpsApiHistory,
     cleanupRioGpsApiHistory,
+    saveRioToGpsUltimaPassagem,
 };
