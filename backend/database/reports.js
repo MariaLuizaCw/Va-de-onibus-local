@@ -1,7 +1,7 @@
 const { dbPool } = require('./pool');
 const { API_TIMEZONE, formatDateYYYYMMDDInTimeZone } = require('../utils');
 
-const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
+const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 200;
 
 async function generateSentidoCoverageReport() {
     const yesterday = new Date();

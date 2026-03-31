@@ -11,7 +11,7 @@ function getDbPool() {
 const itinerarioByLinha = Object.create(null);
 let loaded = false;
 
-const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
+const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 200;
 
 async function loadItinerarioIntoMemory() {
     for (const key of Object.keys(itinerarioByLinha)) {

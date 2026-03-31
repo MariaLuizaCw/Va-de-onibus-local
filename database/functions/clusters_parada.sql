@@ -244,7 +244,7 @@ BEGIN
             il.itinerario_id
         FROM clusters_com_buffer cb
         INNER JOIN itinerarios_linha il ON 
-            ST_Contains(cb.geom_cluster::geometry, il.ponto_inicio)
+            ST_DWithin(cb.geom_cluster, il.ponto_inicio::geography, 50)
         ORDER BY cb.cid, il.itinerario_id
     )
 

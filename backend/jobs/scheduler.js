@@ -3,7 +3,7 @@ const { fetchRioGPSData } = require('../fetchers/rioFetcher');
 const { fetchAngraGPSData, fetchCircularLines } = require('../fetchers/angraFetcher');
 const { fetchRioItaGPSData } = require('../fetchers/rioItaFetcher');
 const { fetchGtfsRoutesData, fetchGtfsGPSData } = require('../fetchers/gtfsFetcher');
-const { syncRioSnapshot, syncAngraSnapshot, syncRioItaSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport, cleanupProximityEvents, cleanupHistoricoViagens, processarViagensRio, cleanupRioGpsApiHistory } = require('../database/index');
+const { syncRioSnapshot, syncAngraSnapshot, syncRioItaSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport, cleanupHistoricoViagens, processarViagensRio, cleanupRioGpsApiHistory, cleanupUltimasPosicoes } = require('../database/index');
 const { getRioOnibus, replaceRioOnibusSnapshot } = require('../stores/rioOnibusStore');
 const { getAngraOnibus, replaceAngraOnibusSnapshot } = require('../stores/angraOnibusStore');
 const { getRioItaOnibus, replaceRioItaOnibusSnapshot } = require('../stores/rioItaStore');
@@ -25,9 +25,9 @@ const handlers = {
     syncAngraSnapshot: () => syncAngraSnapshot(getAngraOnibus, replaceAngraOnibusSnapshot),
     syncRioItaSnapshot: () => syncRioItaSnapshot(getRioItaOnibus, replaceRioItaOnibusSnapshot),
     deleteOldJobExecutions,
-    cleanupProximityEvents,
     cleanupHistoricoViagens,
     cleanupRioGpsApiHistory,
+    cleanupUltimasPosicoes,
     fetchGtfsRoutesData: (data = {}) => fetchGtfsRoutesData(data),
     fetchGtfsGPSData: (data = {}) => fetchGtfsGPSData(data)
 };

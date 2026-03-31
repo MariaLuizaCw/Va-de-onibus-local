@@ -1,5 +1,18 @@
 const { dbPool } = require('./pool');
-const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio, cleanupProximityEvents, cleanupHistoricoViagens, saveRioGpsApiHistory, cleanupRioGpsApiHistory, saveRioToGpsUltimaPassagem } = require('./rio');
+const { 
+    enrichRecordsWithSentido, 
+    saveRioToGpsSentido, 
+    processarViagensRio, 
+    cleanupHistoricoViagens, 
+    saveRioGpsApiHistory, 
+    cleanupRioGpsApiHistory, 
+    saveRioToGpsUltimaPassagem,
+    // Nova lógica de detecção de sentido
+    atualizarUltimasPosicoes,
+    processarSentidoNovaLogica,
+    upsertGpsSentidoBatch,
+    cleanupUltimasPosicoes,
+} = require('./rio');
 const { enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('./angra');
 const { enrichGtfsRecordsWithSentido, saveGtfsToGpsSentido, identificarSentido, enrichVehicles } = require('./gtfs');
 const { 
@@ -19,13 +32,17 @@ module.exports = {
     dbPool,
     enrichRecordsWithSentido,
     saveRioToGpsSentido,
-    saveRioToGpsProximidadeTerminalEvento,
     processarViagensRio,
-    cleanupProximityEvents,
     cleanupHistoricoViagens,
     saveRioGpsApiHistory,
     cleanupRioGpsApiHistory,
     saveRioToGpsUltimaPassagem,
+    // Nova lógica de detecção de sentido
+    atualizarUltimasPosicoes,
+    processarSentidoNovaLogica,
+    upsertGpsSentidoBatch,
+    cleanupUltimasPosicoes,
+    // Angra
     enrichAngraRecordsWithSentido,
     saveAngraToGpsSentido,
     enrichGtfsRecordsWithSentido,

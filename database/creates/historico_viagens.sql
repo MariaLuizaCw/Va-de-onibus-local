@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS public.gps_historico_viagens (
     metodo_inferencia_origem TEXT,
     metodo_inferencia_destino TEXT,
     
+    -- Metadados para debug: JSON com info da ultima_passagem ou scores do fallback
+    metadados_origem JSONB,
+    metadados_destino JSONB,
+    
     timestamp_inicio TIMESTAMP NOT NULL,
     timestamp_fim TIMESTAMP,
     

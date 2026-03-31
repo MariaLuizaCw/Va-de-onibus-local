@@ -13,12 +13,11 @@
       "cron": "0 * * * * *",
       "description": "Busca dados GPS do Rio a cada 1 minuto e atualiza as tabelas",
       "options": {
-        "saveToGpsProximidadeTerminalEvento": true,
-        "saveToGpsSentido": false,
+        "atualizarUltimasPosicoes": true,
+        "saveToGpsSentido": true,
+        "processarViagens": true,
         "updateInMemoryStore": true,
-        "processarViagens": false,
-        "saveRawHistory": true,
-        "saveToGpsUltimaPassagem": true
+        "saveRawHistory": false
       }
     },
     {
@@ -36,13 +35,6 @@
       "runOnStartup": true
     },
     {
-      "name": "cleanup-proximity-events",
-      "handler": "cleanupProximityEvents",
-      "cron": "0 * * * *",
-      "description": "Remove eventos de proximidade antigos cada 1 hora",
-      "runOnStartup": true
-    },
-    {
       "name": "cleanup-historico-viagens",
       "handler": "cleanupHistoricoViagens",
       "cron": "0 2 * * *",
@@ -54,6 +46,13 @@
       "handler": "cleanupRioGpsApiHistory",
       "cron": "0 * * * *",
       "description": "Remove histórico bruto da API Rio GPS com mais de 7 dias - executa a cada 1 hora",
+      "runOnStartup": false
+    },
+    {
+      "name": "cleanup-ultimas-posicoes",
+      "handler": "cleanupUltimasPosicoes",
+      "cron": "0 * * * *",
+      "description": "Remove registros antigos da tabela auxiliar de últimas posições (retenção: 2h) - executa a cada 1 hora",
       "runOnStartup": false
     }
   ]

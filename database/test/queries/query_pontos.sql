@@ -5,7 +5,7 @@
 -- PARÂMETROS CONFIGURÁVEIS
 WITH parametros AS (
     SELECT
-        '416'::text AS linha_numero,              -- Número da linha (ex: '220', '123')
+        '275'::text AS linha_numero,              -- Número da linha (ex: '220', '123')
         50::integer AS dbscan_eps_metros,         -- DBSCAN eps em metros (raio de vizinhança)
         5::integer AS dbscan_minpoints,           -- DBSCAN minpoints (mínimo de pontos por cluster)
         480::integer AS duracao_minima_segundos,  -- Duração mínima de parada (em segundos, 480 = 8 min)
@@ -232,8 +232,10 @@ itinerarios_linha AS (
 ),
 
 -- ============================================================================
--- VALIDAÇÃO: CLUSTER CONTÉM INÍCIO DE ITINERÁRIO?
+-- VALIDAÇÃO: CLUSTER PRÓXIMO A INÍCIO DE ITINERÁRIO? (COM MARGEM DE 50M)
 -- ============================================================================
+-- Utilizando ST_DWithin para validar se o ponto de início está a até 50 metros
+-- do cluster (ao invés de estar contido dentro dele)
 
 clusters_validados AS (
     SELECT DISTINCT ON (cb.cluster_id)
@@ -243,7 +245,7 @@ clusters_validados AS (
         il.route_id
     FROM clusters_com_buffer cb
     INNER JOIN itinerarios_linha il ON 
-        ST_Contains(cb.geom_cluster::geometry, il.ponto_inicio)
+        ST_DWithin(cb.geom_cluster, il.ponto_inicio::geography, 50)
     ORDER BY cb.cluster_id, il.route_id
 )
 

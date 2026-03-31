@@ -89,116 +89,217 @@ $$;
 
 -- -----------------------------------------------------------------------------
 -- fn_atualizar_ultima_passagem
--- Atualiza a tabela gps_ultima_passagem com base na regra B:
--- - Ônibus que permaneceu >= 8 minutos a <= 150m do início de um itinerário
--- - Carrega o sentido correspondente no label_ultima_passagem
+-- Atualiza a tabela gps_ultima_passagem com base em:
+-- - PASSO 0: Invalida última passagem se ônibus está longe da rota (>200m)
+-- - REGRA TERMINAL (via clusters): Ponto dentro do buffer de cluster "Terminal"
+-- - REGRA GARAGEM: Ponto dentro do buffer de cluster "Garagem"
 -- Usado por: rioFetcher.js -> processamento de última passagem
 -- -----------------------------------------------------------------------------
+
+
 CREATE OR REPLACE FUNCTION fn_atualizar_ultima_passagem(
     p_points jsonb,
-    p_terminal_proximity_distance_meters numeric DEFAULT 150,
-    p_proximity_window_minutes numeric DEFAULT 30,
-    p_proximity_min_duration_minutes numeric DEFAULT 8
+    p_max_distancia_rota_metros numeric DEFAULT 200
 )
 RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    -- =========================================================================
+    -- PASSO 0: Invalidar última passagem se ônibus está longe da rota (>200m)
+    -- Quando em_terminal=FALSE e distância > threshold, limpa os campos
+    -- =========================================================================
+    WITH pts_invalidar AS (
+        SELECT
+            (r.value->>'ordem')::text AS ordem,
+            (r.value->>'linha')::text AS linha,
+            ST_SetSRID(
+                ST_MakePoint(
+                    (r.value->>'lon')::double precision,
+                    (r.value->>'lat')::double precision
+                ),
+                4326
+            ) AS geom
+        FROM jsonb_array_elements(p_points) r
+    ),
+    passagens_a_invalidar AS (
+        SELECT 
+            gup.ordem,
+            gup.linha
+        FROM gps_ultima_passagem gup
+        JOIN pts_invalidar pi ON pi.ordem = gup.ordem AND pi.linha = gup.linha
+        JOIN public.itinerario i ON i.id = gup.itinerario_id AND i.habilitado = true
+        WHERE gup.label_ultima_passagem = 'Terminal'
+          AND gup.em_terminal = FALSE
+          AND ST_Distance(pi.geom::geography, i.the_geom::geography) > p_max_distancia_rota_metros
+    )
+    UPDATE gps_ultima_passagem gup
+    SET 
+        label_ultima_passagem = NULL,
+        sentido = NULL,
+        itinerario_id = NULL,
+        metodo_detecao = NULL
+    FROM passagens_a_invalidar pai
+    WHERE gup.ordem = pai.ordem 
+      AND gup.linha = pai.linha;
+
+    -- =========================================================================
+    -- PASSO 1: Processar novas detecções de terminal/garagem
+    -- =========================================================================
     WITH pts AS (
         SELECT
             (r.value->>'ordem')::text AS ordem,
             (r.value->>'linha')::text AS linha,
+            (r.value->>'lat')::double precision AS lat,
+            (r.value->>'lon')::double precision AS lon,
             (r.value->>'datahora')::timestamp with time zone AS datahora
         FROM jsonb_array_elements(p_points) r
     ),
     
     -- =========================================================================
-    -- REGRA B: Permanência próxima ao terminal (150m por >= 8 min em janela de 30 min)
+    -- REGRA GARAGEM: Qualquer ponto dentro do buffer de cluster tipo "Garagem"
     -- =========================================================================
-    regra_b_registros AS (
-        SELECT
+    regra_garagem AS (
+        SELECT DISTINCT ON (pts.ordem, pts.linha)
             pts.ordem,
             pts.linha,
-            e.itinerario_id,
-            e.sentido,
-            e.datahora
+            'Garagem' AS label,
+            NULL::text AS sentido,
+            NULL::integer AS itinerario_id,
+            'Cluster_Garagem' AS metodo_detecao,
+            pts.lat AS lat_detecao,
+            pts.lon AS lon_detecao,
+            pts.datahora AS timestamp_identificacao
         FROM pts
-        JOIN public.gps_proximidade_terminal_evento e
-            ON e.ordem = pts.ordem
-            AND e.linha = pts.linha
-            AND e.distancia_metros <= p_terminal_proximity_distance_meters
-    ),
-    regra_b_max_datahora AS (
-        SELECT
-            rb.ordem,
-            rb.linha,
-            rb.itinerario_id,
-            rb.sentido,
-            MAX(rb.datahora) AS max_datahora
-        FROM regra_b_registros rb
-        GROUP BY rb.ordem, rb.linha, rb.itinerario_id, rb.sentido
-    ),
-    regra_b_janela AS (
-        SELECT
-            rbd.ordem,
-            rbd.linha,
-            rbd.itinerario_id,
-            rbd.sentido,
-            rbd.max_datahora,
-            MIN(rb.datahora) AS min_datahora_janela
-        FROM regra_b_max_datahora rbd
-        JOIN regra_b_registros rb 
-            ON rb.ordem = rbd.ordem 
-            AND rb.linha = rbd.linha 
-            AND rb.itinerario_id = rbd.itinerario_id 
-            AND rb.sentido = rbd.sentido
-        WHERE rb.datahora >= rbd.max_datahora - (p_proximity_window_minutes || ' minutes')::INTERVAL
-        GROUP BY rbd.ordem, rbd.linha, rbd.itinerario_id, rbd.sentido, rbd.max_datahora
-    ),
-    regra_b AS (
-        SELECT DISTINCT ON (rbj.ordem, rbj.linha)
-            rbj.ordem,
-            rbj.linha,
-            rbj.sentido,
-            rbj.max_datahora AS timestamp_identificacao
-        FROM regra_b_janela rbj
-        WHERE rbj.max_datahora - rbj.min_datahora_janela >= (p_proximity_min_duration_minutes || ' minutes')::INTERVAL
-        ORDER BY rbj.ordem, rbj.linha, rbj.max_datahora DESC
+        JOIN clusters_parada_resultado cpr
+            ON cpr.linha_analisada = pts.linha
+            AND cpr.tipo_cluster = 'Garagem'
+            AND ST_Contains(
+                cpr.geom_cluster::geometry,
+                ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326)
+            )
+        ORDER BY pts.ordem, pts.linha, pts.datahora DESC
     ),
     
     -- =========================================================================
-    -- ATUALIZAÇÃO: Todos os pontos recebidos atualizam datahora_atualizacao
-    -- Apenas os que passaram na regra B atualizam label e datahora_identificacao
+    -- REGRA TERMINAL VIA CLUSTERS: Ponto dentro do buffer de cluster "Terminal"
+    -- Para terminais ambíguos (2+ itinerários), usa correlação de avanço
     -- =========================================================================
-    dados_para_upsert AS (
+    
+    -- 1. Identificar todos os clusters "Terminal" que o ônibus está dentro
+    terminais_candidatos AS (
+        SELECT DISTINCT
+            pts.ordem,
+            pts.linha,
+            pts.lat,
+            pts.lon,
+            pts.datahora,
+            cpr.cluster_id,
+            cpr.geom_cluster
+        FROM pts
+        JOIN clusters_parada_resultado cpr
+            ON cpr.linha_analisada = pts.linha
+            AND cpr.tipo_cluster = 'Terminal'
+            AND ST_Contains(
+                cpr.geom_cluster::geometry,
+                ST_SetSRID(ST_MakePoint(pts.lon, pts.lat), 4326)
+            )
+    ),
+    
+    -- 2. Usar sentido e itinerario_id diretamente do cluster
+    regra_cluster_terminal AS (
+        SELECT DISTINCT ON (tc.ordem, tc.linha)
+            tc.ordem,
+            tc.linha,
+            'Terminal' AS label,
+            cpr.sentido,
+            cpr.itinerario_id,
+            'Cluster_Terminal' AS metodo_detecao,
+            tc.lat AS lat_detecao,
+            tc.lon AS lon_detecao,
+            tc.datahora AS timestamp_identificacao
+        FROM terminais_candidatos tc
+        JOIN clusters_parada_resultado cpr
+            ON cpr.cluster_id = tc.cluster_id
+            AND cpr.linha_analisada = tc.linha
+        ORDER BY tc.ordem, tc.linha, tc.datahora DESC
+    ),
+    
+    -- =========================================================================
+    -- COMBINAÇÃO: Garagem tem prioridade, depois cluster terminal
+    -- em_terminal = TRUE se detectou terminal/garagem, FALSE caso contrário
+    -- =========================================================================
+    resultado_final AS (
         SELECT
             pts.ordem,
             pts.linha,
-            rb.sentido AS label_ultima_passagem,
+            COALESCE(rg.label, rct.label) AS label_ultima_passagem,
+            COALESCE(rg.sentido, rct.sentido) AS sentido,
+            COALESCE(rg.itinerario_id, rct.itinerario_id) AS itinerario_id,
+            COALESCE(rg.metodo_detecao, rct.metodo_detecao) AS metodo_detecao,
+            COALESCE(rg.lat_detecao, rct.lat_detecao) AS lat_detecao,
+            COALESCE(rg.lon_detecao, rct.lon_detecao) AS lon_detecao,
             pts.datahora AS datahora_atualizacao,
-            rb.timestamp_identificacao AS datahora_identificacao
+            COALESCE(rg.timestamp_identificacao, rct.timestamp_identificacao) AS datahora_identificacao,
+            -- em_terminal: TRUE se detectou, FALSE se não detectou (saiu do terminal)
+            (rg.ordem IS NOT NULL OR rct.ordem IS NOT NULL) AS em_terminal
         FROM pts
-        LEFT JOIN regra_b rb ON rb.ordem = pts.ordem AND rb.linha = pts.linha
+        LEFT JOIN regra_garagem rg ON rg.ordem = pts.ordem AND rg.linha = pts.linha
+        LEFT JOIN regra_cluster_terminal rct ON rct.ordem = pts.ordem AND rct.linha = pts.linha
     )
     
     INSERT INTO gps_ultima_passagem (
         ordem,
         linha,
         label_ultima_passagem,
+        sentido,
+        itinerario_id,
+        metodo_detecao,
+        lat_detecao,
+        lon_detecao,
         datahora_atualizacao,
-        datahora_identificacao
+        datahora_identificacao,
+        em_terminal
     )
     SELECT
-        d.ordem,
-        d.linha,
-        d.label_ultima_passagem,
-        d.datahora_atualizacao,
-        d.datahora_identificacao
-    FROM dados_para_upsert d
+        rf.ordem,
+        rf.linha,
+        rf.label_ultima_passagem,
+        rf.sentido,
+        rf.itinerario_id,
+        rf.metodo_detecao,
+        rf.lat_detecao,
+        rf.lon_detecao,
+        rf.datahora_atualizacao,
+        rf.datahora_identificacao,
+        rf.em_terminal
+    FROM resultado_final rf
     ON CONFLICT (ordem, linha) DO UPDATE SET
         datahora_atualizacao = EXCLUDED.datahora_atualizacao,
-        -- Só atualiza label e datahora_identificacao se houver nova identificação
+        -- Sempre atualiza em_terminal (TRUE se está, FALSE se saiu)
+        em_terminal = EXCLUDED.em_terminal,
+        -- Só atualiza os outros campos se houver nova identificação
         label_ultima_passagem = COALESCE(EXCLUDED.label_ultima_passagem, gps_ultima_passagem.label_ultima_passagem),
+        sentido = CASE 
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.sentido
+            ELSE gps_ultima_passagem.sentido
+        END,
+        itinerario_id = CASE 
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.itinerario_id
+            ELSE gps_ultima_passagem.itinerario_id
+        END,
+        metodo_detecao = CASE 
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.metodo_detecao
+            ELSE gps_ultima_passagem.metodo_detecao
+        END,
+        lat_detecao = CASE 
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.lat_detecao
+            ELSE gps_ultima_passagem.lat_detecao
+        END,
+        lon_detecao = CASE 
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.lon_detecao
+            ELSE gps_ultima_passagem.lon_detecao
+        END,
         datahora_identificacao = CASE 
             WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.datahora_identificacao
             ELSE gps_ultima_passagem.datahora_identificacao
@@ -249,6 +350,7 @@ $$;
 -- fn_processar_viagens_rio
 -- Processa mudanças de sentido e gerencia viagens abertas/fechadas
 -- Função dedicada para lógica stateful de viagens
+-- GARAGEM é tratado como sentido válido (fecha viagem anterior, abre nova)
 -- Usado por: fn_upsert_gps_sentido_rio_batch_json
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_processar_viagens_rio(
@@ -268,7 +370,8 @@ BEGIN
             (r.value->>'sentido')::text    AS sentido,
             (r.value->>'sentido_itinerario_id')::int AS itinerario_id,
             (r.value->>'datahora')::timestamp AS datahora,
-            (r.value->>'metodo_inferencia')::text AS metodo_inferencia
+            (r.value->>'metodo_inferencia')::text AS metodo_inferencia,
+            (r.value->'metadados')::jsonb AS metadados
         FROM jsonb_array_elements(p_records) r
     ),
     mudanca AS (
@@ -280,37 +383,48 @@ BEGIN
         JOIN gps_sentido gs
           ON gs.ordem = n.ordem
          AND gs.token = n.token
-        JOIN public.itinerario i_ant
+        LEFT JOIN public.itinerario i_ant
           ON i_ant.id = gs.sentido_itinerario_id
-        JOIN public.itinerario i_novo
+        LEFT JOIN public.itinerario i_novo
           ON i_novo.id = n.itinerario_id
         WHERE
             gs.sentido IS NOT NULL
             AND n.sentido IS NOT NULL
             AND LOWER(TRIM(gs.sentido)) <> LOWER(TRIM(n.sentido))
-            AND gs.sentido_itinerario_id <> n.itinerario_id
-            AND NOT ST_Equals(
-                ST_StartPoint(i_ant.the_geom),
-                ST_StartPoint(i_novo.the_geom)
+            -- Mudança válida se:
+            -- 1. Um dos dois é GARAGEM → sempre válido
+            -- 2. Nenhum é GARAGEM → itinerários diferentes com pontos de partida diferentes
+            AND (
+                UPPER(gs.sentido) = 'GARAGEM'
+                OR UPPER(n.sentido) = 'GARAGEM'
+                OR (
+                    gs.sentido_itinerario_id <> n.itinerario_id
+                    AND NOT ST_Equals(
+                        ST_StartPoint(i_ant.the_geom),
+                        ST_StartPoint(i_novo.the_geom)
+                    )
+                )
             )
-            -- AND n.datahora - gs.datahora > (p_min_duration_minutes || ' minutes')::INTERVAL
     ),
     ultima_viagem AS (
-        SELECT DISTINCT ON (hv.ordem, hv.token)
+        SELECT DISTINCT ON (hv.ordem, hv.token, hv.linha)
             hv.id,
             m.datahora,
             m.itinerario_id    AS itinerario_destino,
             m.sentido          AS nome_terminal_destino,
-            m.metodo_inferencia AS metodo_inferencia_destino
+            m.metodo_inferencia AS metodo_inferencia_destino,
+            m.metadados        AS metadados_destino
         FROM mudanca m
         JOIN gps_historico_viagens hv
         ON hv.ordem = m.ordem
         AND hv.token = m.token
+        AND hv.linha = m.linha
         AND hv.timestamp_fim IS NULL
-        AND m.datahora > hv.timestamp_inicio   -- 🔥 ESSENCIAL
+        AND m.datahora > hv.timestamp_inicio
         ORDER BY
             hv.ordem,
             hv.token,
+            hv.linha,
             hv.timestamp_inicio DESC,
             m.datahora DESC
     )
@@ -320,7 +434,8 @@ BEGIN
         duracao_viagem = uv.datahora - hv.timestamp_inicio,
         itinerario_id_destino = uv.itinerario_destino,
         nome_terminal_destino = uv.nome_terminal_destino,
-        metodo_inferencia_destino = uv.metodo_inferencia_destino
+        metodo_inferencia_destino = uv.metodo_inferencia_destino,
+        metadados_destino = uv.metadados_destino
     FROM ultima_viagem uv
     WHERE hv.id = uv.id;
 
@@ -333,7 +448,8 @@ BEGIN
             (r.value->>'sentido')::text    AS sentido,
             (r.value->>'sentido_itinerario_id')::int AS itinerario_id,
             (r.value->>'datahora')::timestamp AS datahora,
-            (r.value->>'metodo_inferencia')::text AS metodo_inferencia
+            (r.value->>'metodo_inferencia')::text AS metodo_inferencia,
+            (r.value->'metadados')::jsonb AS metadados
         FROM jsonb_array_elements(p_records) r
     ),
     mudanca AS (
@@ -343,20 +459,28 @@ BEGIN
         JOIN gps_sentido gs
           ON gs.ordem = n.ordem
          AND gs.token = n.token
-        JOIN public.itinerario i_ant
+        LEFT JOIN public.itinerario i_ant
           ON i_ant.id = gs.sentido_itinerario_id
-        JOIN public.itinerario i_novo
+        LEFT JOIN public.itinerario i_novo
           ON i_novo.id = n.itinerario_id
         WHERE
             gs.sentido IS NOT NULL
             AND n.sentido IS NOT NULL
-            AND LOWER(gs.sentido) <> LOWER(n.sentido)
-            AND gs.sentido_itinerario_id <> n.itinerario_id
-            AND NOT ST_Equals(
-                ST_StartPoint(i_ant.the_geom),
-                ST_StartPoint(i_novo.the_geom)
+            AND LOWER(TRIM(gs.sentido)) <> LOWER(TRIM(n.sentido))
+            -- Mudança válida se:
+            -- 1. Um dos dois é GARAGEM → sempre válido
+            -- 2. Nenhum é GARAGEM → itinerários diferentes com pontos de partida diferentes
+            AND (
+                UPPER(gs.sentido) = 'GARAGEM'
+                OR UPPER(n.sentido) = 'GARAGEM'
+                OR (
+                    gs.sentido_itinerario_id <> n.itinerario_id
+                    AND NOT ST_Equals(
+                        ST_StartPoint(i_ant.the_geom),
+                        ST_StartPoint(i_novo.the_geom)
+                    )
+                )
             )
-            -- AND n.datahora - gs.datahora > (p_min_duration_minutes || ' minutes')::INTERVAL
     )
     INSERT INTO gps_historico_viagens (
         ordem,
@@ -365,6 +489,7 @@ BEGIN
         itinerario_id_origem,
         nome_terminal_origem,
         metodo_inferencia_origem,
+        metadados_origem,
         timestamp_inicio,
         timestamp_fim,
         duracao_viagem
@@ -376,6 +501,7 @@ BEGIN
         m.itinerario_id,
         m.sentido,
         m.metodo_inferencia,
+        m.metadados,
         m.datahora,
         NULL,
         NULL
@@ -388,7 +514,7 @@ $$;
 -- fn_upsert_gps_sentido_rio_batch_json
 -- Upsert registros GPS com sentido do Rio em batch
 -- Recebe JSON array e usa jsonb_array_elements para processar
--- Chama função dedicada para processar viagens
+-- NOTA: Viagens são processadas separadamente pelo backend (processarViagensRio)
 -- Usado por: rio.js -> saveRioToGpsSentido (batch)
 -- -----------------------------------------------------------------------------
 
@@ -399,10 +525,7 @@ RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    -- Processar viagens com lógica stateful
-    PERFORM fn_processar_viagens_rio(p_records);
-
-    -- Upsert normal dos registros GPS (mantido inalterado)
+    -- Upsert normal dos registros GPS
     INSERT INTO gps_sentido (
         ordem,
         datahora,

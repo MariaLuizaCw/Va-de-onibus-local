@@ -2,15 +2,7 @@ const { dbPool } = require('./pool');
 const { formatDateInTimeZone } = require('../utils');
 const { logJobExecution } = require('./jobLogs');
 
-const PROXIMITY_EVENT_RETENTION_HOURS = Number(process.env.PROXIMITY_EVENT_RETENTION_HOURS) || 8;
-
-
-
-const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
-const TERMINAL_PASSAGE_DISTANCE_METERS = Number(process.env.TERMINAL_PASSAGE_DISTANCE_METERS) || 20;
-const TERMINAL_PROXIMITY_DISTANCE_METERS = Number(process.env.TERMINAL_PROXIMITY_DISTANCE_METERS) || 100;
-const PROXIMITY_WINDOW_MINUTES = Number(process.env.PROXIMITY_WINDOW_MINUTES) || 30;
-const PROXIMITY_MIN_DURATION_MINUTES = Number(process.env.PROXIMITY_MIN_DURATION_MINUTES) || 8;
+const MAX_SNAP_DISTANCE_METERS = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 200;
 
 async function enrichRecordsWithSentido(records) {
     if (!records || records.length === 0) return [];
@@ -162,84 +154,6 @@ async function saveRioToGpsSentido(records) {
 
 
 
-async function saveRioToGpsProximidadeTerminalEvento(records) {
-    if (!records || records.length === 0) return;
-    
-    const startedAt = new Date();
-    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
-    let totalProcessed = 0;
-
-    for (let i = 0; i < records.length; i += BATCH_SIZE) {
-        const batch = records.slice(i, i + BATCH_SIZE);
-
-        const pointsJson = batch.map(record => {
-            const lat = typeof record.latitude === 'string'
-                ? Number(record.latitude.replace(',', '.'))
-                : Number(record.latitude);
-            const lon = typeof record.longitude === 'string'
-                ? Number(record.longitude.replace(',', '.'))
-                : Number(record.longitude);
-
-            const datahoraMs = Number(record.datahora);
-            const datahoraTimestamp = Number.isFinite(datahoraMs)
-                ? formatDateInTimeZone(new Date(datahoraMs))
-                : null;
-
-            return {
-                ordem: String(record.ordem),
-                datahora: datahoraTimestamp,
-                linha: record.linha,
-                lon: lon,
-                lat: lat
-            };
-        });
-
-        try {
-            await dbPool.query(
-                'SELECT fn_insert_gps_proximidade_terminal_evento_json($1::jsonb, $2)',
-                [JSON.stringify(pointsJson), MAX_SNAP_DISTANCE_METERS]
-            );
-            totalProcessed += batch.length;
-        } catch (err) {
-            console.error('[Rio][gps_proximidade_terminal_evento] Error inserting records:', err.message);
-        }
-    }
-
-    // Log da subtask
-    const finishedAt = new Date();
-    const durationMs = finishedAt - startedAt;
-    
-    await logJobExecution({
-        jobName: 'saveRioToGpsProximidadeTerminalEvento',
-        parentJob: 'rio-gps-fetch',
-        subtask: true,
-        startedAt,
-        finishedAt,
-        durationMs,
-        status: 'success',
-        infoMessage: `${totalProcessed} registros processados`
-    });
-}
-
-async function cleanupProximityEvents() {
-    // Apenas executa o cleanup - logging é feito pelo scheduler
-    try {
-        // Usar função SQL em vez de DELETE direto
-        const result = await dbPool.query(
-            'SELECT * FROM fn_cleanup_gps_proximidade_terminal_evento($1)',
-            [PROXIMITY_EVENT_RETENTION_HOURS]
-        );
-        
-        const deletedCount = result.rows.length > 0 ? (result.rows[0].deleted_count || 0) : 0;
-        
-        console.log(`[Cleanup] Proximity events: ${deletedCount} registros removidos`);
-        
-    } catch (error) {
-        console.error('[Cleanup] Error cleaning proximity events:', error.message);
-        throw error;
-    }
-}
-
 async function cleanupHistoricoViagens() {
     const retentionDays = Number(process.env.HISTORICO_VIAGENS_RETENTION_DAYS) || 30;
     
@@ -342,10 +256,14 @@ async function processarViagensRio(records) {
         const batch = records.slice(i, i + BATCH_SIZE);
 
         const recordsJson = batch.map(record => {
-            const datahoraMs = Number(record.datahora);
-            const datahoraTimestamp = Number.isFinite(datahoraMs)
-                ? formatDateInTimeZone(new Date(datahoraMs))
-                : null;
+            // datahora pode vir como string (já formatado) ou como milissegundos
+            let datahoraTimestamp = record.datahora;
+            if (typeof record.datahora === 'number' || !isNaN(Number(record.datahora))) {
+                const datahoraMs = Number(record.datahora);
+                if (Number.isFinite(datahoraMs) && datahoraMs > 1000000000000) {
+                    datahoraTimestamp = formatDateInTimeZone(new Date(datahoraMs));
+                }
+            }
 
             return {
                 ordem: record.ordem,
@@ -354,7 +272,8 @@ async function processarViagensRio(records) {
                 sentido: record.sentido || null,
                 sentido_itinerario_id: record.sentido_itinerario_id || null,
                 metodo_inferencia: record.metodo_inferencia || null,
-                token: 'PMRJ'
+                metadados: record.metadados || null,
+                token: record.token || 'PMRJ'
             };
         });
         
@@ -391,8 +310,13 @@ const ULTIMA_PASSAGEM_PROXIMITY_METERS = Number(process.env.ULTIMA_PASSAGEM_PROX
 const ULTIMA_PASSAGEM_WINDOW_MINUTES = Number(process.env.ULTIMA_PASSAGEM_WINDOW_MINUTES) || 30;
 const ULTIMA_PASSAGEM_MIN_DURATION_MINUTES = Number(process.env.ULTIMA_PASSAGEM_MIN_DURATION_MINUTES) || 8;
 
+// Configurações para nova lógica de detecção de sentido
+const SENTIDO_MAX_IDADE_ULTIMA_PASSAGEM_MIN = Number(process.env.SENTIDO_MAX_IDADE_ULTIMA_PASSAGEM_MIN) || 15;
+const SENTIDO_MAX_DISTANCIA_ROTA_METROS = Number(process.env.SENTIDO_MAX_DISTANCIA_ROTA_METROS) || 300;
+const SENTIDO_MAX_DISTANCIA_FALLBACK_METROS = Number(process.env.SENTIDO_MAX_DISTANCIA_FALLBACK_METROS) || 1000;
+
 async function saveRioToGpsUltimaPassagem(records) {
-    if (!records || records.length === 0) return;
+    if (!records || records.length === 0) return 0;
     
     const startedAt = new Date();
     const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
@@ -410,6 +334,8 @@ async function saveRioToGpsUltimaPassagem(records) {
             return {
                 ordem: String(record.ordem),
                 linha: String(record.linha),
+                lat: parseFloat(String(record.latitude).replace(',', '.')),
+                lon: parseFloat(String(record.longitude).replace(',', '.')),
                 datahora: datahoraTimestamp
             };
         });
@@ -448,14 +374,249 @@ async function saveRioToGpsUltimaPassagem(records) {
     return totalProcessed;
 }
 
+// =============================================================================
+// NOVA LÓGICA DE DETECÇÃO DE SENTIDO (2 etapas: ultima_passagem + fallback)
+// =============================================================================
+
+/**
+ * Atualiza a tabela auxiliar de últimas 5 posições por ônibus/linha
+ * Essa tabela é usada pela nova lógica de detecção de sentido
+ */
+async function atualizarUltimasPosicoes(records) {
+    if (!records || records.length === 0) return { inseridos: 0, removidos: 0 };
+    
+    const startedAt = new Date();
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
+    let totalInseridos = 0;
+    let totalRemovidos = 0;
+
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+
+        const recordsJson = batch.map(record => {
+            const lat = typeof record.latitude === 'string'
+                ? Number(record.latitude.replace(',', '.'))
+                : Number(record.latitude);
+            const lon = typeof record.longitude === 'string'
+                ? Number(record.longitude.replace(',', '.'))
+                : Number(record.longitude);
+
+            const datahoraMs = Number(record.datahora);
+            const datahoraTimestamp = Number.isFinite(datahoraMs)
+                ? formatDateInTimeZone(new Date(datahoraMs))
+                : null;
+
+            return {
+                ordem: String(record.ordem),
+                linha: String(record.linha),
+                datahora: datahoraTimestamp,
+                latitude: lat,
+                longitude: lon,
+                velocidade: Number(record.velocidade) || null
+            };
+        });
+
+        try {
+            const result = await dbPool.query(
+                'SELECT * FROM fn_atualizar_ultimas_posicoes($1::jsonb)',
+                [JSON.stringify(recordsJson)]
+            );
+            if (result.rows.length > 0) {
+                totalInseridos += Number(result.rows[0].registros_inseridos) || 0;
+                totalRemovidos += Number(result.rows[0].registros_removidos) || 0;
+            }
+        } catch (err) {
+            console.error('[Rio][ultimas_posicoes] Error updating records:', err.message);
+        }
+    }
+
+    const finishedAt = new Date();
+    await logJobExecution({
+        jobName: 'atualizarUltimasPosicoes',
+        parentJob: 'rio-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs: finishedAt - startedAt,
+        status: 'success',
+        infoMessage: `${totalInseridos} inseridos, ${totalRemovidos} removidos`
+    });
+
+    return { inseridos: totalInseridos, removidos: totalRemovidos };
+}
+
+/**
+ * Processa detecção de sentido usando nova lógica (2 etapas)
+ * Retorna registros enriquecidos com sentido, metodo_detecao, etc.
+ * NÃO faz upsert - apenas enriquece os dados
+ * em_terminal é consultado diretamente da tabela gps_ultima_passagem pela função SQL
+ * @param {Array} records - Registros GPS
+ * @param {string} token - Token de identificação
+ */
+async function processarSentidoNovaLogica(records, token = 'PMRJ') {
+    if (!records || records.length === 0) return { processados: 0, comSentido: 0, garagem: 0, registros: [] };
+    
+    const startedAt = new Date();
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
+    const allEnrichedRecords = [];
+
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+
+        const recordsJson = batch.map(record => {
+            const lat = typeof record.latitude === 'string'
+                ? Number(record.latitude.replace(',', '.'))
+                : Number(record.latitude);
+            const lon = typeof record.longitude === 'string'
+                ? Number(record.longitude.replace(',', '.'))
+                : Number(record.longitude);
+
+            const datahoraMs = Number(record.datahora);
+            const datahoraTimestamp = Number.isFinite(datahoraMs)
+                ? formatDateInTimeZone(new Date(datahoraMs))
+                : null;
+
+            return {
+                ordem: String(record.ordem),
+                linha: String(record.linha),
+                datahora: datahoraTimestamp,
+                latitude: lat,
+                longitude: lon,
+                velocidade: Number(record.velocidade) || null
+            };
+        });
+
+        try {
+            // Detecta sentido - já retorna route_name e consulta em_terminal da tabela
+            const result = await dbPool.query(
+                'SELECT * FROM fn_processar_sentido_batch($1::jsonb)',
+                [JSON.stringify(recordsJson)]
+            );
+            
+            // Mapear sentido por ordem|linha (já inclui route_name e em_terminal)
+            const sentidoMap = new Map();
+            for (const row of result.rows) {
+                sentidoMap.set(`${row.ordem}|${row.linha}`, row);
+            }
+
+            // Enriquecer registros
+            for (const rec of recordsJson) {
+                const key = `${rec.ordem}|${rec.linha}`;
+                const sentidoInfo = sentidoMap.get(key);
+
+                // Metadados já incluem em_terminal da função SQL
+                let metadados = sentidoInfo?.json_pontos_avaliados || {};
+                if (typeof metadados === 'string') {
+                    try { metadados = JSON.parse(metadados); } catch (e) { metadados = {}; }
+                }
+
+                allEnrichedRecords.push({
+                    ordem: rec.ordem,
+                    linha: rec.linha,
+                    datahora: rec.datahora,
+                    latitude: rec.latitude,
+                    longitude: rec.longitude,
+                    velocidade: rec.velocidade,
+                    sentido: sentidoInfo?.sentido || null,
+                    sentido_itinerario_id: sentidoInfo?.itinerario_id || null,
+                    route_name: sentidoInfo?.route_name || rec.linha,
+                    token: token,
+                    metodo_inferencia: sentidoInfo?.metodo_detecao || null,
+                    metadados: metadados
+                });
+            }
+        } catch (err) {
+            console.error('[Rio][sentido_nova_logica] Error processing records:', err.message);
+        }
+    }
+
+    // Calcular métricas
+    const totalProcessados = allEnrichedRecords.length;
+    const totalComSentido = allEnrichedRecords.filter(r => r.sentido && r.sentido !== 'GARAGEM').length;
+    const totalGaragem = allEnrichedRecords.filter(r => r.sentido === 'GARAGEM').length;
+
+    const finishedAt = new Date();
+    await logJobExecution({
+        jobName: 'processarSentidoNovaLogica',
+        parentJob: 'rio-gps-fetch',
+        subtask: true,
+        startedAt,
+        finishedAt,
+        durationMs: finishedAt - startedAt,
+        status: 'success',
+        infoMessage: `${totalProcessados} processados, ${totalComSentido} com sentido, ${totalGaragem} garagem`
+    });
+
+    return { 
+        processados: totalProcessados, 
+        comSentido: totalComSentido, 
+        garagem: totalGaragem,
+        registros: allEnrichedRecords
+    };
+}
+
+/**
+ * Faz upsert em gps_sentido com registros já enriquecidos
+ */
+async function upsertGpsSentidoBatch(enrichedRecords) {
+    if (!enrichedRecords || enrichedRecords.length === 0) return 0;
+    
+    const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
+    let totalUpserted = 0;
+
+    for (let i = 0; i < enrichedRecords.length; i += BATCH_SIZE) {
+        const batch = enrichedRecords.slice(i, i + BATCH_SIZE);
+        
+        try {
+            const result = await dbPool.query(
+                'SELECT * FROM fn_upsert_gps_sentido_batch($1::jsonb)',
+                [JSON.stringify(batch)]
+            );
+            if (result.rows.length > 0) {
+                totalUpserted += Number(result.rows[0].registros_processados) || 0;
+            }
+        } catch (err) {
+            console.error('[Rio][upsert_gps_sentido] Error:', err.message);
+        }
+    }
+
+    return totalUpserted;
+}
+
+/**
+ * Cleanup da tabela auxiliar de últimas posições
+ */
+async function cleanupUltimasPosicoes() {
+    const retentionHours = Number(process.env.ULTIMAS_POSICOES_RETENTION_HOURS) || 2;
+    
+    try {
+        const result = await dbPool.query(
+            'SELECT * FROM fn_cleanup_ultimas_posicoes($1::integer)',
+            [retentionHours]
+        );
+        
+        const deletedCount = result.rows.length > 0 ? (result.rows[0].deleted_count || 0) : 0;
+        
+        console.log(`[Cleanup] Últimas posições: ${deletedCount} registros removidos (retenção: ${retentionHours}h)`);
+        
+        return deletedCount;
+    } catch (error) {
+        console.error('[Cleanup] Error cleaning ultimas posicoes:', error.message);
+        throw error;
+    }
+}
+
 module.exports = {
     enrichRecordsWithSentido,
     saveRioToGpsSentido,
-    saveRioToGpsProximidadeTerminalEvento,
     processarViagensRio,
-    cleanupProximityEvents,
     cleanupHistoricoViagens,
     saveRioGpsApiHistory,
     cleanupRioGpsApiHistory,
     saveRioToGpsUltimaPassagem,
+    // Nova lógica de detecção de sentido
+    atualizarUltimasPosicoes,
+    processarSentidoNovaLogica,
+    upsertGpsSentidoBatch,
+    cleanupUltimasPosicoes,
 };

@@ -1,5 +1,12 @@
 const axios = require('axios');
-const { enrichRecordsWithSentido, saveRioToGpsSentido, saveRioToGpsProximidadeTerminalEvento, processarViagensRio, saveRioGpsApiHistory, saveRioToGpsUltimaPassagem } = require('../database/index');
+const { 
+    saveRioGpsApiHistory, 
+    saveRioToGpsUltimaPassagem,
+    atualizarUltimasPosicoes,
+    processarSentidoNovaLogica,
+    upsertGpsSentidoBatch,
+    processarViagensRio,
+} = require('../database/index');
 const { API_TIMEZONE, formatDateInTimeZone } = require('../utils');
 const { addPositions } = require('../stores/rioOnibusStore');
 
@@ -51,46 +58,45 @@ async function fetchRioGPSData(options = {}) {
         // 22k registros → ~3k registros únicos
         const latestRecords = deduplicateByOrdem(records);
 
-        // gps_proximidade_terminal_evento: recebe apenas registros únicos para análise
-        if (options.saveToGpsProximidadeTerminalEvento) {
-            await saveRioToGpsProximidadeTerminalEvento(latestRecords)
-                .then(() => console.log(`[Rio][gps_proximidade_terminal_evento] Sucesso: ${latestRecords.length} registros`))
-                .catch(err => console.error('[Rio][gps_proximidade_terminal_evento] Falha:', err.message))
+        // atualizarUltimasPosicoes: atualiza tabela auxiliar de últimas 5 posições
+        if (options.atualizarUltimasPosicoes) {
+            await atualizarUltimasPosicoes(latestRecords)
+                .then(result => console.log(`[Rio][ultimas_posicoes] Sucesso: ${result.inseridos} inseridos, ${result.removidos} removidos`))
+                .catch(err => console.error('[Rio][ultimas_posicoes] Falha:', err.message));
         }
-        
 
         // gps_ultima_passagem: atualiza tabela de última passagem usando regra B (150m, 8min)
+        // Também atualiza coluna em_terminal na tabela
         if (options.saveToGpsUltimaPassagem) {
-            await saveRioToGpsUltimaPassagem(latestRecords)
-                .then(() => console.log(`[Rio][gps_ultima_passagem] Sucesso: ${latestRecords.length} registros`))
-                .catch(err => console.error('[Rio][gps_ultima_passagem] Falha:', err.message));
-        }
-
-        // processar viagens: recebe registros enriquecidos para detectar mudanças de sentido (ANTES do upsert)
-        if (options.processarViagens) {
-            const enrichedRecords = await enrichRecordsWithSentido(latestRecords);
             try {
-                await processarViagensRio(enrichedRecords)
-                    .then(() => console.log(`[Rio][viagens] Sucesso: ${enrichedRecords.length} registros processados`))
-                    .catch(err => console.error('[Rio][viagens] Falha:', err.message))
+                const totalProcessed = await saveRioToGpsUltimaPassagem(latestRecords);
+                console.log(`[Rio][gps_ultima_passagem] Sucesso: ${totalProcessed} registros`);
             } catch (err) {
-                console.error('[Rio][viagens] processarViagensRio failed', err);
+                console.error('[Rio][gps_ultima_passagem] Falha:', err.message);
             }
         }
 
-        // gps_sentido: recebe apenas os mais recentes (com sentido) (DEPOIS do processamento de viagens)
-        if (options.saveToGpsSentido) {
-            const enrichedRecords = await enrichRecordsWithSentido(latestRecords);
-            try {
-                await saveRioToGpsSentido(enrichedRecords)
-                    .then(() => console.log(`[Rio][gps_sentido] Sucesso: ${enrichedRecords.length} registros`))
-                    .catch(err => console.error('[Rio][gps_sentido] Falha:', err.message))
-            } catch (err) {
-                console.error('[Rio][sentido] enrichRecordsWithSentido failed; continuing without sentido', err);
-            }
+        // Fluxo: enriquecer → processar viagens → upsert gps_sentido
+        let enrichedRecords = [];
+        if (options.saveToGpsSentido || options.processarViagens) {
+            // 1. Detectar sentido e enriquecer (em_terminal é consultado da tabela gps_ultima_passagem)
+            const result = await processarSentidoNovaLogica(latestRecords, 'PMRJ');
+            enrichedRecords = result.registros || [];
+            console.log(`[Rio][sentido] Detectado: ${result.processados} processados, ${result.comSentido} com sentido, ${result.garagem} garagem`);
+        }
+        
+        // 2. Processar viagens ANTES do upsert (usa dados enriquecidos)
+        if (options.processarViagens && enrichedRecords.length > 0) {
+            await processarViagensRio(enrichedRecords)
+                .then(result => console.log(`[Rio][viagens] Sucesso: ${result} registros processados`))
+                .catch(err => console.error('[Rio][viagens] Falha:', err.message));
         }
 
- 
+        // 3. Fazer upsert em gps_sentido por último
+        if (options.saveToGpsSentido && enrichedRecords.length > 0) {
+            const upserted = await upsertGpsSentidoBatch(enrichedRecords);
+            console.log(`[Rio][gps_sentido] Upsert: ${upserted} registros`);
+        }
 
         if (options.updateInMemoryStore) await addPositions(latestRecords);
 
