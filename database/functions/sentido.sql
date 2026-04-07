@@ -95,14 +95,15 @@ $$;
 -- ============================================================================
 -- fn_processar_sentido_batch
 -- Processa sentido em batch para múltiplos ônibus
--- VERSÃO SIMPLIFICADA: Usa APENAS score baseado nas últimas posições GPS
--- Sem dependência de última passagem em terminal
+-- Detecção em 2 etapas com prioridade:
+--   1. Terminal: cluster de parada ou início de itinerário (prioridade máxima)
+--   2. Score: correlação de avanço + distância à rota (fallback)
 -- ============================================================================
-
 CREATE OR REPLACE FUNCTION fn_processar_sentido_batch(
     p_records jsonb,
-    p_max_distancia_rota_metros numeric DEFAULT 200,
-    p_min_pontos_para_score integer DEFAULT 2
+    p_max_distancia_rota_metros numeric DEFAULT 300,
+    p_min_pontos_para_score integer DEFAULT 2,
+    p_raio_inicio_itinerario_metros numeric DEFAULT 100
 ) RETURNS TABLE (
     ordem text,
     linha text,
@@ -117,12 +118,17 @@ CREATE OR REPLACE FUNCTION fn_processar_sentido_batch(
 ) LANGUAGE sql AS $$
 WITH
 
--- 1. Parse dos registros de entrada
-registros AS (
+-- ============================================================================
+-- ETAPA 1: PARSING DOS REGISTROS DE ENTRADA
+-- ============================================================================
+
+registros_entrada AS (
     SELECT
         (r.value->>'ordem')::text AS ordem,
         (r.value->>'linha')::text AS linha,
         (r.value->>'datahora')::timestamp with time zone AS datahora,
+        (r.value->>'latitude')::double precision AS latitude,
+        (r.value->>'longitude')::double precision AS longitude,
         ST_SetSRID(
             ST_MakePoint(
                 (r.value->>'longitude')::double precision,
@@ -137,261 +143,373 @@ registros AS (
         AND (r.value->>'longitude') IS NOT NULL
 ),
 
--- 2. Últimas posições com número sequencial
-ultimas_posicoes AS (
+-- ============================================================================
+-- ETAPA 2: HISTÓRICO DE POSIÇÕES GPS (ÚLTIMOS PONTOS EM 15 MIN)
+-- ============================================================================
+
+historico_gps AS (
     SELECT
         gup.ordem,
         gup.linha,
+        gup.latitude,
+        gup.longitude,
         gup.geom,
-        ROW_NUMBER() OVER (PARTITION BY gup.ordem, gup.linha ORDER BY gup.datahora DESC) AS rn
+        ROW_NUMBER() OVER (PARTITION BY gup.ordem, gup.linha ORDER BY gup.datahora DESC) AS seq_posicao
     FROM gps_ultimas_posicoes gup
-    INNER JOIN registros reg ON reg.ordem = gup.ordem AND reg.linha = gup.linha
+    INNER JOIN registros_entrada reg ON reg.ordem = gup.ordem AND reg.linha = gup.linha
+    WHERE gup.geom IS NOT NULL
+      AND gup.datahora >= reg.datahora - INTERVAL '15 minutes'
 ),
 
--- 3. Calcular scores em uma única agregação
-scores AS (
+-- ============================================================================
+-- ETAPA 3: DETECÇÃO POR TERMINAL (PRIORIDADE MÁXIMA)
+-- Verifica se o ponto atual OU algum ponto histórico recente está:
+--   a) Dentro de um cluster de terminal
+--   b) A menos de p_raio_inicio_itinerario_metros do início de um itinerário
+-- Ponto atual tem prioridade sobre histórico; cluster sobre início de itinerário.
+-- ============================================================================
+
+-- Une ponto atual + pontos históricos para verificar terminal
+pontos_terminal_check AS (
+    SELECT ordem, linha, geom, 0 AS prioridade_ponto FROM registros_entrada
+    UNION ALL
+    SELECT ordem, linha, geom, seq_posicao AS prioridade_ponto FROM historico_gps
+),
+
+deteccao_terminal AS (
+    SELECT DISTINCT ON (ptc.ordem, ptc.linha)
+        ptc.ordem,
+        ptc.linha,
+        COALESCE(cpr.sentido, it.sentido) AS sentido_terminal,
+        COALESCE(cpr.itinerario_id, it.id) AS itinerario_id_terminal,
+        COALESCE(it_cluster.route_name, it.route_name) AS route_name_terminal,
+        CASE 
+            WHEN cpr.cluster_unique_id IS NOT NULL THEN 'cluster_terminal'
+            WHEN it.id IS NOT NULL THEN 'inicio_itinerario'
+        END AS tipo_deteccao_terminal,
+        CASE 
+            WHEN cpr.cluster_unique_id IS NOT NULL 
+                THEN ST_Distance(ptc.geom::geography, cpr.geom_cluster)::numeric
+            ELSE ST_Distance(ptc.geom::geography, ST_StartPoint(it.the_geom)::geography)::numeric
+        END AS dist_terminal_metros,
+        cpr.cluster_unique_id,
+        cpr.max_distance_metros AS raio_cluster_metros,
+        CASE 
+            WHEN cpr.cluster_unique_id IS NOT NULL 
+                THEN ROUND(cpr.lat_cluster, 6)
+            WHEN it.the_geom IS NOT NULL 
+                THEN ROUND(ST_Y(ST_StartPoint(it.the_geom))::numeric, 6)
+            ELSE NULL
+        END AS terminal_latitude,
+        CASE 
+            WHEN cpr.cluster_unique_id IS NOT NULL
+                THEN ROUND(cpr.lon_cluster, 6)
+            WHEN it.the_geom IS NOT NULL 
+                THEN ROUND(ST_X(ST_StartPoint(it.the_geom))::numeric, 6)
+            ELSE NULL
+        END AS terminal_longitude
+    FROM pontos_terminal_check ptc
+    LEFT JOIN clusters_parada_resultado cpr 
+        ON cpr.linha_analisada = ptc.linha
+        AND cpr.tipo_cluster = 'Terminal'
+        AND cpr.sentido IS NOT NULL
+        AND ST_DWithin(ptc.geom::geography, cpr.geom_cluster, cpr.max_distance_metros)
+    -- Busca route_name do itinerário associado ao cluster
+    LEFT JOIN public.itinerario it_cluster
+        ON it_cluster.id = cpr.itinerario_id
+    -- Fallback: início do itinerário (só se não achou cluster)
+    LEFT JOIN public.itinerario it
+        ON it.numero_linha = ptc.linha
+        AND it.habilitado = true
+        AND cpr.cluster_unique_id IS NULL
+        AND ST_DWithin(
+            ptc.geom::geography,
+            ST_StartPoint(it.the_geom)::geography,
+            p_raio_inicio_itinerario_metros
+        )
+    WHERE cpr.cluster_unique_id IS NOT NULL OR it.id IS NOT NULL
+    ORDER BY ptc.ordem, ptc.linha,
+        -- Ponto atual (0) tem prioridade sobre históricos (1..N)
+        ptc.prioridade_ponto,
+        -- Cluster tem prioridade sobre início de itinerário
+        CASE WHEN cpr.cluster_unique_id IS NOT NULL THEN 0 ELSE 1 END,
+        -- Menor distância
+        CASE 
+            WHEN cpr.cluster_unique_id IS NOT NULL 
+                THEN ST_Distance(ptc.geom::geography, cpr.geom_cluster)
+            ELSE ST_Distance(ptc.geom::geography, ST_StartPoint(it.the_geom)::geography)
+        END ASC
+),
+
+-- ============================================================================
+-- ETAPA 4: MÉTRICAS POR SENTIDO CANDIDATO
+-- Para cada ônibus × sentido, calcula:
+--   - Distância média dos pontos GPS à linestring do itinerário
+--   - Desvio padrão dessa distância (consistência)
+--   - Correlação entre avanço temporal e progresso na rota
+-- ============================================================================
+
+metricas_por_sentido AS (
     SELECT
-        up.ordem,
-        up.linha,
-        i.id AS itinerario_id,
-        i.sentido,
-        i.route_name,
+        gps.ordem,
+        gps.linha,
+        it.id AS itinerario_id,
+        it.sentido,
+        it.route_name,
         COUNT(*) AS num_pontos,
-        AVG(ST_Distance(up.geom::geography, i.the_geom::geography))::numeric AS dist_media,
-        COALESCE(STDDEV(ST_Distance(up.geom::geography, i.the_geom::geography)), 0)::numeric AS dist_stddev,
-        COALESCE(CORR((-up.rn)::numeric, ST_LineLocatePoint(i.the_geom, up.geom)::numeric), 0)::numeric AS corr_avanco,
-        ROW_NUMBER() OVER (
-            PARTITION BY up.ordem, up.linha
-            ORDER BY 
-                -- Score final direto aqui
-                (GREATEST(COALESCE(CORR((-up.rn)::numeric, ST_LineLocatePoint(i.the_geom, up.geom)::numeric), 0), 0) * 0.4
-                + CASE WHEN AVG(ST_Distance(up.geom::geography, i.the_geom::geography)) <= 20 THEN 1.0
-                       WHEN AVG(ST_Distance(up.geom::geography, i.the_geom::geography)) <= 50 THEN 0.7
-                       WHEN AVG(ST_Distance(up.geom::geography, i.the_geom::geography)) <= 100 THEN 0.4
-                       ELSE 0.1 END * 0.4
-                + CASE WHEN STDDEV(ST_Distance(up.geom::geography, i.the_geom::geography)) <= 5 THEN 1.0
-                       WHEN STDDEV(ST_Distance(up.geom::geography, i.the_geom::geography)) <= 15 THEN 0.7
-                       WHEN STDDEV(ST_Distance(up.geom::geography, i.the_geom::geography)) <= 30 THEN 0.4
-                       ELSE 0.1 END * 0.2) DESC,
-                AVG(ST_Distance(up.geom::geography, i.the_geom::geography)) ASC
-        ) AS rank
-    FROM ultimas_posicoes up
-    INNER JOIN public.itinerario i ON i.numero_linha = up.linha AND i.habilitado = true
-    GROUP BY up.ordem, up.linha, i.id, i.sentido, i.route_name
+        AVG(ST_Distance(gps.geom::geography, it.the_geom::geography))::numeric AS dist_media_metros,
+        COALESCE(STDDEV(ST_Distance(gps.geom::geography, it.the_geom::geography)), 0)::numeric AS dist_stddev_metros,
+        -- Correlação: 1.0 = avança na rota, -1.0 = contrário, 0 = sem relação
+        COALESCE(
+            CORR(
+                (-gps.seq_posicao)::numeric,
+                ST_LineLocatePoint(it.the_geom, gps.geom)::numeric
+            ),
+            0
+        )::numeric AS corr_avanco
+    FROM historico_gps gps
+    INNER JOIN public.itinerario it 
+        ON it.numero_linha = gps.linha AND it.habilitado = true
+    GROUP BY gps.ordem, gps.linha, it.id, it.sentido, it.route_name
 ),
 
--- 4. Distância do ponto atual mais próximo
-dist_atual AS (
+-- ============================================================================
+-- ETAPA 5: SCORE DE CONFIANÇA
+-- Calcula score (0..1) e elege o melhor sentido por ônibus
+--   40% correlação de avanço (capped >= 0)
+--   40% proximidade à rota (escalonada)
+--   20% consistência de distância (escalonada)
+-- ============================================================================
+
+metricas_com_score AS (
+    SELECT
+        *,
+        (
+            GREATEST(corr_avanco, 0) * 0.4
+            + CASE WHEN dist_media_metros <= 20  THEN 1.0
+                   WHEN dist_media_metros <= 50  THEN 0.7
+                   WHEN dist_media_metros <= 100 THEN 0.4
+                   ELSE 0.1
+              END * 0.4
+            + CASE WHEN dist_stddev_metros <= 5  THEN 1.0
+                   WHEN dist_stddev_metros <= 15 THEN 0.7
+                   WHEN dist_stddev_metros <= 30 THEN 0.4
+                   ELSE 0.1
+              END * 0.2
+        )::numeric AS score_final
+    FROM metricas_por_sentido
+),
+
+melhor_score AS (
+    SELECT DISTINCT ON (ordem, linha) *
+    FROM metricas_com_score
+    ORDER BY ordem, linha, score_final DESC, dist_media_metros ASC, corr_avanco DESC, itinerario_id ASC
+),
+
+-- ============================================================================
+-- ETAPA 6: DISTÂNCIA DO PONTO ATUAL À ROTA MAIS PRÓXIMA
+-- ============================================================================
+
+distancia_ponto_atual AS (
     SELECT
         reg.ordem,
         reg.linha,
-        MIN(ST_Distance(reg.geom::geography, i.the_geom::geography))::numeric AS dist_metros
-    FROM registros reg
-    INNER JOIN public.itinerario i ON i.numero_linha = reg.linha AND i.habilitado = true
+        MIN(ST_Distance(reg.geom::geography, it.the_geom::geography))::numeric AS dist_metros
+    FROM registros_entrada reg
+    INNER JOIN public.itinerario it 
+        ON it.numero_linha = reg.linha AND it.habilitado = true
     GROUP BY reg.ordem, reg.linha
 ),
 
--- 5. Apenas o melhor sentido
-melhor_sentido AS (
-    SELECT * FROM scores WHERE rank = 1
-),
+-- ============================================================================
+-- ETAPA 7: RESULTADO CONSOLIDADO
+-- Une terminal + score + distância e determina método e sentido final
+-- Prioridade: em_terminal > sem_historico > poucos_pontos > garagem > score
+-- ============================================================================
 
--- 6. Agregar pontos avaliados por ordem/linha
-pontos_avaliados AS (
+resultado AS (
     SELECT
-        up.ordem,
-        up.linha,
-        jsonb_agg(
-            jsonb_build_object(
-                'seq', up.rn,
-                'latitude', ROUND(ST_Y(up.geom)::numeric, 6),
-                'longitude', ROUND(ST_X(up.geom)::numeric, 6)
-            ) ORDER BY up.rn
-        ) AS pontos
-    FROM ultimas_posicoes up
-    GROUP BY up.ordem, up.linha
-),
-
--- 7. Agregar métricas de todos os sentidos candidatos
-metricas_por_sentido AS (
-    SELECT
-        s.ordem,
-        s.linha,
-        jsonb_agg(
-            jsonb_build_object(
-                'sentido', s.sentido,
-                'itinerario_id', s.itinerario_id,
-                'route_name', s.route_name,
-                'num_pontos', s.num_pontos,
-                'dist_media', ROUND(s.dist_media, 2),
-                'dist_stddev', ROUND(s.dist_stddev, 2),
-                'corr_avanco', ROUND(s.corr_avanco, 4),
-                'score', ROUND((
-                    GREATEST(s.corr_avanco, 0) * 0.4
-                    + CASE WHEN s.dist_media <= 20 THEN 1.0
-                           WHEN s.dist_media <= 50 THEN 0.7
-                           WHEN s.dist_media <= 100 THEN 0.4
-                           ELSE 0.1 END * 0.4
-                    + CASE WHEN s.dist_stddev <= 5 THEN 1.0
-                           WHEN s.dist_stddev <= 15 THEN 0.7
-                           WHEN s.dist_stddev <= 30 THEN 0.4
-                           ELSE 0.1 END * 0.2
-                )::numeric, 4),
-                'rank', s.rank
-            ) ORDER BY s.rank
-        ) AS sentidos
-    FROM scores s
-    GROUP BY s.ordem, s.linha
-)
-
--- RESULTADO
-SELECT
-    reg.ordem,
-    reg.linha,
-    
-    -- Lógica de sentido em um CASE simples
-    CASE
-        WHEN ms.ordem IS NULL THEN NULL
-        WHEN ms.num_pontos < p_min_pontos_para_score THEN NULL
-        WHEN d.dist_metros > p_max_distancia_rota_metros THEN 'GARAGEM'::text
-        ELSE ms.sentido
-    END,
-    
-    CASE WHEN d.dist_metros <= p_max_distancia_rota_metros AND ms.num_pontos >= p_min_pontos_para_score 
-         THEN ms.itinerario_id ELSE NULL END,
-    
-    COALESCE(ms.route_name, reg.linha),
-    
-    CASE
-        WHEN ms.ordem IS NULL THEN 'sem_historico'::text
-        WHEN ms.num_pontos < p_min_pontos_para_score THEN 'poucos_pontos'::text
-        WHEN d.dist_metros > p_max_distancia_rota_metros THEN 'garagem_por_distancia'::text
-        ELSE 'score'::text
-    END,
-    
-    ROUND(COALESCE(d.dist_metros, 0), 2),
-    reg.datahora,
-    CASE WHEN ms.ordem IS NULL THEN 0::numeric
-    ELSE ROUND((
-        GREATEST(ms.corr_avanco, 0) * 0.4
-        + CASE WHEN ms.dist_media <= 20 THEN 1.0
-               WHEN ms.dist_media <= 50 THEN 0.7
-               WHEN ms.dist_media <= 100 THEN 0.4
-               ELSE 0.1 END * 0.4
-        + CASE WHEN ms.dist_stddev <= 5 THEN 1.0
-               WHEN ms.dist_stddev <= 15 THEN 0.7
-               WHEN ms.dist_stddev <= 30 THEN 0.4
-               ELSE 0.1 END * 0.2
-    )::numeric, 4) END,
-    
-    jsonb_build_object(
-        'metodo_detecao', CASE
-            WHEN ms.ordem IS NULL THEN 'sem_historico'
-            WHEN ms.num_pontos < p_min_pontos_para_score THEN 'poucos_pontos'
-            WHEN d.dist_metros > p_max_distancia_rota_metros THEN 'garagem_por_distancia'
+        reg.ordem,
+        reg.linha,
+        reg.datahora,
+        reg.latitude,
+        reg.longitude,
+        reg.geom,
+        
+        -- Método de detecção
+        CASE
+            WHEN dt.tipo_deteccao_terminal IS NOT NULL  THEN 'em_terminal'
+            WHEN sc.ordem IS NULL                       THEN 'sem_historico'
+            WHEN sc.num_pontos < p_min_pontos_para_score THEN 'poucos_pontos'
+            WHEN dpa.dist_metros > p_max_distancia_rota_metros THEN 'garagem_por_distancia'
             ELSE 'score'
-        END,
-        'ponto_atual', jsonb_build_object(
-            'latitude', ROUND(ST_Y(reg.geom)::numeric, 6),
-            'longitude', ROUND(ST_X(reg.geom)::numeric, 6)
-        ),
-        'distancia_ponto_atual_metros', ROUND(COALESCE(d.dist_metros, 0), 2),
-        'score_total', CASE WHEN ms.ordem IS NULL THEN 0::numeric
-            ELSE ROUND((
-                GREATEST(ms.corr_avanco, 0) * 0.4
-                + CASE WHEN ms.dist_media <= 20 THEN 1.0
-                       WHEN ms.dist_media <= 50 THEN 0.7
-                       WHEN ms.dist_media <= 100 THEN 0.4
-                       ELSE 0.1 END * 0.4
-                + CASE WHEN ms.dist_stddev <= 5 THEN 1.0
-                       WHEN ms.dist_stddev <= 15 THEN 0.7
-                       WHEN ms.dist_stddev <= 30 THEN 0.4
-                       ELSE 0.1 END * 0.2
-            )::numeric, 4) END,
-        'metricas_sentido_escolhido', jsonb_build_object(
-            'sentido', ms.sentido,
-            'itinerario_id', ms.itinerario_id,
-            'num_pontos', COALESCE(ms.num_pontos, 0),
-            'dist_media', ROUND(COALESCE(ms.dist_media, 0), 2),
-            'dist_stddev', ROUND(COALESCE(ms.dist_stddev, 0), 2),
-            'corr_avanco', ROUND(COALESCE(ms.corr_avanco, 0), 4)
-        ),
-        'pontos_avaliados', COALESCE(pa.pontos, '[]'::jsonb),
-        'sentidos_candidatos', COALESCE(mps.sentidos, '[]'::jsonb)
-    )
-
-FROM registros reg
-LEFT JOIN melhor_sentido ms ON ms.ordem = reg.ordem AND ms.linha = reg.linha
-LEFT JOIN dist_atual d ON d.ordem = reg.ordem AND d.linha = reg.linha
-LEFT JOIN pontos_avaliados pa ON pa.ordem = reg.ordem AND pa.linha = reg.linha
-LEFT JOIN metricas_por_sentido mps ON mps.ordem = reg.ordem AND mps.linha = reg.linha;
-
-$$;
-
--- -----------------------------------------------------------------------------
--- fn_upsert_gps_sentido_batch
--- Faz upsert em gps_sentido recebendo registros JÁ ENRIQUECIDOS
--- Recebe JSON array com: ordem, linha, datahora, latitude, longitude, velocidade,
---                        sentido, sentido_itinerario_id, route_name, token, metodo_detecao
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION fn_upsert_gps_sentido_batch(p_records jsonb)
-RETURNS TABLE (
-    registros_processados bigint
-)
-LANGUAGE sql
-AS $$
-WITH dados AS (
-    SELECT
-        (r.value->>'ordem')::text AS ordem,
-        (r.value->>'datahora')::timestamp AS datahora,
-        (r.value->>'linha')::text AS linha,
-        (r.value->>'latitude')::double precision AS latitude,
-        (r.value->>'longitude')::double precision AS longitude,
-        (r.value->>'velocidade')::double precision AS velocidade,
-        (r.value->>'sentido')::text AS sentido,
-        (r.value->>'sentido_itinerario_id')::integer AS sentido_itinerario_id,
-        (r.value->>'route_name')::text AS route_name,
-        (r.value->>'token')::text AS token
-    FROM jsonb_array_elements(p_records) r
+        END AS metodo_deteccao,
+        
+        -- Sentido determinado
+        CASE
+            WHEN dt.tipo_deteccao_terminal IS NOT NULL  THEN dt.sentido_terminal
+            WHEN sc.ordem IS NULL                       THEN NULL
+            WHEN sc.num_pontos < p_min_pontos_para_score THEN NULL
+            WHEN dpa.dist_metros > p_max_distancia_rota_metros THEN 'GARAGEM'
+            ELSE sc.sentido
+        END AS sentido_determinado,
+        
+        -- Itinerário final
+        CASE
+            WHEN dt.tipo_deteccao_terminal IS NOT NULL  THEN dt.itinerario_id_terminal
+            WHEN sc.ordem IS NOT NULL
+                 AND sc.num_pontos >= p_min_pontos_para_score
+                 AND dpa.dist_metros <= p_max_distancia_rota_metros THEN sc.itinerario_id
+            ELSE NULL
+        END AS itinerario_id_final,
+        
+        -- Route name (terminal tem prioridade, fallback para score, depois linha)
+        COALESCE(
+            CASE WHEN dt.tipo_deteccao_terminal IS NOT NULL THEN dt.route_name_terminal END,
+            sc.route_name,
+            reg.linha
+        ) AS route_name,
+        
+        -- Score de confiança
+        CASE
+            WHEN dt.tipo_deteccao_terminal IS NOT NULL THEN 1.0::numeric
+            ELSE COALESCE(sc.score_final, 0)
+        END AS score_final,
+        
+        COALESCE(dpa.dist_metros, 0) AS dist_rota_metros,
+        
+        -- Campos do terminal (para metadado)
+        dt.tipo_deteccao_terminal,
+        dt.dist_terminal_metros,
+        dt.cluster_unique_id,
+        dt.raio_cluster_metros,
+        dt.terminal_latitude,
+        dt.terminal_longitude,
+        
+        -- Campos do score (para metadado)
+        sc.num_pontos,
+        sc.dist_media_metros,
+        sc.dist_stddev_metros,
+        sc.corr_avanco
+        
+    FROM registros_entrada reg
+    LEFT JOIN deteccao_terminal dt ON dt.ordem = reg.ordem AND dt.linha = reg.linha
+    LEFT JOIN melhor_score sc ON sc.ordem = reg.ordem AND sc.linha = reg.linha
+    LEFT JOIN distancia_ponto_atual dpa ON dpa.ordem = reg.ordem AND dpa.linha = reg.linha
 ),
-upserted AS (
-    INSERT INTO gps_sentido (
-        ordem,
-        datahora,
-        linha,
-        latitude,
-        longitude,
-        velocidade,
-        sentido,
-        sentido_itinerario_id,
-        route_name,
-        token
-    )
+
+-- ============================================================================
+-- ETAPA 8: AGREGAÇÃO DE PONTOS GPS (METADADO)
+-- ============================================================================
+
+pontos_gps_avaliados AS (
     SELECT
-        d.ordem,
-        d.datahora,
-        d.linha,
-        d.latitude,
-        d.longitude,
-        d.velocidade,
-        d.sentido,
-        d.sentido_itinerario_id,
-        d.route_name,
-        d.token
-    FROM dados d
-    ON CONFLICT (ordem, token) DO UPDATE SET
-        datahora = EXCLUDED.datahora,
-        linha = EXCLUDED.linha,
-        latitude = EXCLUDED.latitude,
-        longitude = EXCLUDED.longitude,
-        velocidade = EXCLUDED.velocidade,
-        sentido = EXCLUDED.sentido,
-        sentido_itinerario_id = EXCLUDED.sentido_itinerario_id,
-        route_name = EXCLUDED.route_name
-    WHERE gps_sentido.datahora IS NULL OR EXCLUDED.datahora > gps_sentido.datahora
-    RETURNING 1
+        gps.ordem,
+        gps.linha,
+        jsonb_agg(
+            jsonb_build_object(
+                'seq', gps.seq_posicao,
+                'latitude', ROUND(gps.latitude::numeric, 6),
+                'longitude', ROUND(gps.longitude::numeric, 6)
+            ) ORDER BY gps.seq_posicao
+        ) AS pontos_json
+    FROM historico_gps gps
+    GROUP BY gps.ordem, gps.linha
+),
+
+-- ============================================================================
+-- ETAPA 9: AGREGAÇÃO DOS SENTIDOS CANDIDATOS (METADADO)
+-- ============================================================================
+
+sentidos_candidatos_agregados AS (
+    SELECT
+        ordem,
+        linha,
+        jsonb_agg(
+            jsonb_build_object(
+                'rank', rn,
+                'sentido', sentido,
+                'itinerario_id', itinerario_id,
+                'route_name', route_name,
+                'num_pontos', num_pontos,
+                'dist_media', ROUND(dist_media_metros, 2),
+                'dist_stddev', ROUND(dist_stddev_metros, 2),
+                'corr_avanco', ROUND(corr_avanco, 4),
+                'score', ROUND(score_final, 4)
+            ) ORDER BY rn
+        ) AS candidatos_json
+    FROM (
+        SELECT *,
+            ROW_NUMBER() OVER (
+                PARTITION BY ordem, linha
+                ORDER BY score_final DESC, dist_media_metros ASC, corr_avanco DESC, itinerario_id ASC
+            ) AS rn
+        FROM metricas_com_score
+    ) ranked
+    GROUP BY ordem, linha
 )
-SELECT COUNT(*)::bigint FROM upserted;
+
+-- ============================================================================
+-- RESULTADO FINAL
+-- ============================================================================
+
+SELECT
+    res.ordem,
+    res.linha,
+    res.sentido_determinado,
+    res.itinerario_id_final,
+    res.route_name,
+    res.metodo_deteccao,
+    ROUND(res.dist_rota_metros, 2),
+    res.datahora,
+    CASE WHEN res.sentido_determinado IS NULL THEN 0::numeric
+         ELSE ROUND(res.score_final, 4) END,
+    
+    -- JSON com metadados específicos por método de detecção
+    jsonb_build_object(
+        'metodo_deteccao', res.metodo_deteccao,
+        'ponto_atual', jsonb_build_object(
+            'latitude', ROUND(res.latitude::numeric, 6),
+            'longitude', ROUND(res.longitude::numeric, 6)
+        ),
+        'distancia_rota_metros', ROUND(res.dist_rota_metros, 2),
+        'detalhes_metodo', CASE
+            -- Terminal: informações da detecção por cluster/início de itinerário
+            WHEN res.metodo_deteccao = 'em_terminal' THEN jsonb_build_object(
+                'tipo', res.tipo_deteccao_terminal,
+                'cluster_unique_id', res.cluster_unique_id,
+                'distancia_terminal_metros', ROUND(COALESCE(res.dist_terminal_metros, 0), 2),
+                'raio_cluster_metros', res.raio_cluster_metros,
+                'terminal_latitude', res.terminal_latitude,
+                'terminal_longitude', res.terminal_longitude
+            )
+            -- Score: métricas da análise de posições GPS
+            WHEN res.metodo_deteccao = 'score' THEN jsonb_build_object(
+                'num_pontos', COALESCE(res.num_pontos, 0),
+                'dist_media_metros', ROUND(COALESCE(res.dist_media_metros, 0), 2),
+                'dist_stddev_metros', ROUND(COALESCE(res.dist_stddev_metros, 0), 2),
+                'corr_avanco', ROUND(COALESCE(res.corr_avanco, 0), 4),
+                'score', ROUND(res.score_final, 4)
+            )
+            -- Garagem: ônibus longe de qualquer rota
+            WHEN res.metodo_deteccao = 'garagem_por_distancia' THEN jsonb_build_object(
+                'distancia_rota_metros', ROUND(res.dist_rota_metros, 2),
+                'limite_metros', p_max_distancia_rota_metros
+            )
+            -- Poucos pontos ou sem histórico: informação mínima
+            ELSE jsonb_build_object(
+                'num_pontos', COALESCE(res.num_pontos, 0),
+                'min_pontos_necessarios', p_min_pontos_para_score
+            )
+        END,
+        'pontos_avaliados', COALESCE(pga.pontos_json, '[]'::jsonb),
+        'sentidos_candidatos', COALESCE(sca.candidatos_json, '[]'::jsonb)
+    ) AS json_pontos_avaliados
+
+FROM resultado res
+LEFT JOIN pontos_gps_avaliados pga ON pga.ordem = res.ordem AND pga.linha = res.linha
+LEFT JOIN sentidos_candidatos_agregados sca ON sca.ordem = res.ordem AND sca.linha = res.linha;
+
 $$;
 
 

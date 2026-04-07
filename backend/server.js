@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const { fetchRioGPSData } = require('./fetchers/rioFetcher');
-const { fetchAngraGPSData, fetchCircularLines } = require('./fetchers/angraFetcher');
+const { fetchAngraGPSData, fetchCircularLines, getCompanyVehicles: getSsxVehicles, getLineLastPositions: getSsxLineLastPositions, getLoadedCompanies: getSsxLoadedCompanies, getStoreStatus: getSsxStoreStatus, SSX_INTEGRATIONS } = require('./fetchers/ssxFetcher');
 const { loadLatestRioOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./database/index');
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
 const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
@@ -167,6 +167,46 @@ router.post('/gtfs_onibus', (req, res) => {
     }
 
     return res.json({ empresa: companyKey, data: getGtfsVehicles(companyKey) });
+});
+
+// SSX endpoints (Angra, BarraPirai, PedroAntonio, Resendense)
+router.get('/ssx/companies', (req, res) => {
+    const companies = getSsxLoadedCompanies();
+    const available = Object.keys(SSX_INTEGRATIONS).map(key => ({
+        key,
+        name: SSX_INTEGRATIONS[key].name,
+        token: SSX_INTEGRATIONS[key].token
+    }));
+    return res.json({ loaded: companies, available });
+});
+
+router.get('/ssx/status', (req, res) => {
+    return res.json(getSsxStoreStatus());
+});
+
+router.post('/ssx_onibus', (req, res) => {
+    const { empresa, linha } = req.body || {};
+
+    if (!empresa || String(empresa).trim() === '') {
+        return res.status(400).json({ error: 'Parâmetro empresa é obrigatório (angra, barrapirai, pedroantonio, resendense)' });
+    }
+
+    const companyKey = String(empresa).toLowerCase();
+
+    // Validar se é uma empresa SSX válida
+    if (!SSX_INTEGRATIONS[companyKey]) {
+        return res.status(400).json({ 
+            error: `Empresa inválida: ${empresa}`,
+            validCompanies: Object.keys(SSX_INTEGRATIONS)
+        });
+    }
+
+    if (linha != null && String(linha).trim() !== '') {
+        const positions = getSsxLineLastPositions(companyKey, linha);
+        return res.json({ empresa: companyKey, linha: String(linha), positions });
+    }
+
+    return res.json({ empresa: companyKey, data: getSsxVehicles(companyKey) });
 });
 
 router.get('/gtfs/routes/:empresa', (req, res) => {

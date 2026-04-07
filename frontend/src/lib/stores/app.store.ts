@@ -7,10 +7,13 @@ import {
     fetchStats,
     fetchGtfsCompanies,
     fetchGtfsRouteData,
+    fetchSsxCompanies,
+    fetchSsxRouteData,
     UnauthorizedError,
     TOKEN_STORAGE_KEY,
     cities as cityOptions
 } from '$lib/services/api';
+import type { SsxCompanyInfo } from '$lib/services/api';
 
 const canUseBrowser = typeof window !== 'undefined';
 
@@ -34,6 +37,10 @@ type AppState = {
     gtfsCompanies: string[];
     gtfsCompaniesLoading: boolean;
     isGtfsSource: boolean;
+    // SSX
+    ssxCompanies: SsxCompanyInfo[];
+    ssxCompaniesLoading: boolean;
+    isSsxSource: boolean;
 };
 
 const initialToken = canUseBrowser ? localStorage.getItem(TOKEN_STORAGE_KEY) : null;
@@ -57,22 +64,28 @@ const initialState: AppState = {
     // GTFS
     gtfsCompanies: [],
     gtfsCompaniesLoading: false,
-    isGtfsSource: false
+    isGtfsSource: false,
+    // SSX
+    ssxCompanies: [],
+    ssxCompaniesLoading: false,
+    isSsxSource: false
 };
 
 function createAppStore() {
     const store = writable<AppState>(initialState);
 
     function setCity(value: string) {
-        // Verificar se é uma empresa GTFS
+        // Verificar se é uma empresa GTFS ou SSX
         const state = get(store);
         const isGtfs = state.gtfsCompanies.includes(value.toUpperCase());
+        const isSsx = state.ssxCompanies.some(c => c.key === value.toLowerCase());
         
         store.update((s) => ({
             ...s,
             city: value,
             isGtfsSource: isGtfs,
-            preferredSortFields: isGtfs ? ['datahora'] : (value === 'rio' ? ['datahora'] : ['event_date', 'EventDate']),
+            isSsxSource: isSsx,
+            preferredSortFields: (isGtfs || isSsx) ? ['datahora'] : (value === 'rio' ? ['datahora'] : ['event_date', 'EventDate']),
             statusMessage: 'Informe a linha desejada para iniciar a busca.',
             tableData: [],
             selectedLineStats: null
@@ -158,10 +171,13 @@ function createAppStore() {
             let lineStats: LineStats | null = null;
             let stats = state.stats;
 
-            // Verificar se é uma empresa GTFS
+            // Verificar se é uma empresa GTFS ou SSX
             if (state.isGtfsSource) {
                 // Buscar dados GTFS
                 records = await fetchGtfsRouteData(state.city, trimmedLine, state.authToken);
+            } else if (state.isSsxSource) {
+                // Buscar dados SSX
+                records = await fetchSsxRouteData(state.city, trimmedLine, state.authToken);
             } else {
                 // Buscar dados normais (Rio, Angra, RioIta)
                 const [routeRecords, fetchedStats] = await Promise.all([
@@ -252,6 +268,24 @@ function createAppStore() {
         }
     }
 
+    async function loadSsxCompanies() {
+        const state = get(store);
+        if (!state.authToken) return;
+        
+        store.update((s) => ({ ...s, ssxCompaniesLoading: true }));
+        try {
+            const response = await fetchSsxCompanies(state.authToken);
+            store.update((s) => ({ ...s, ssxCompanies: response.available, ssxCompaniesLoading: false }));
+        } catch (error) {
+            if (error instanceof UnauthorizedError) {
+                logout(error.message);
+                return;
+            }
+            console.error('Erro ao carregar empresas SSX:', error);
+            store.update((s) => ({ ...s, ssxCompanies: [], ssxCompaniesLoading: false }));
+        }
+    }
+
     return {
         subscribe: store.subscribe,
         setCity,
@@ -261,7 +295,8 @@ function createAppStore() {
         fetchRoute,
         loadStats,
         selectLineStats,
-        loadGtfsCompanies
+        loadGtfsCompanies,
+        loadSsxCompanies
     };
 }
 

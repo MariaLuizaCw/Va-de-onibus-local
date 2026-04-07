@@ -13,7 +13,7 @@ const {
     upsertGpsSentidoBatch,
     cleanupUltimasPosicoes,
 } = require('./rio');
-const { enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('./angra');
+const { enrichSsxRecordsWithSentido, saveSsxToGpsSentido, enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('./ssx');
 const { enrichGtfsRecordsWithSentido, saveGtfsToGpsSentido, identificarSentido, enrichVehicles } = require('./gtfs');
 const { 
     loadOnibusSnapshot, 
@@ -42,7 +42,9 @@ module.exports = {
     processarSentidoNovaLogica,
     upsertGpsSentidoBatch,
     cleanupUltimasPosicoes,
-    // Angra
+    // SSX (Angra, Barra do Piraí, Pedro Antônio, Resendense)
+    enrichSsxRecordsWithSentido,
+    saveSsxToGpsSentido,
     enrichAngraRecordsWithSentido,
     saveAngraToGpsSentido,
     enrichGtfsRecordsWithSentido,

@@ -64,7 +64,6 @@ async function enrichGtfsRecordsWithSentido(records, options = {}) {
     let totalEnriched = 0;
     const maxDistance = Number(process.env.MAX_SNAP_DISTANCE_METERS) || 300;
 
-    console.log(`[GTFS-RT][database] Iniciando enriquecimento de ${records.length} registros`);
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE);
@@ -167,7 +166,6 @@ async function enrichGtfsRecordsWithSentido(records, options = {}) {
         infoMessage: `${totalEnriched}/${totalProcessed} registros enriquecidos com sentido`
     });
 
-    console.log(`[GTFS-RT][database] Enriquecimento concluído: ${totalEnriched}/${totalProcessed} registros com sentido`);
     
     return records;
 }
@@ -184,7 +182,6 @@ async function saveGtfsToGpsSentido(records) {
     const BATCH_SIZE = Number(process.env.DB_BATCH_SIZE) || 400;
     let totalSaved = 0;
 
-    console.log(`[GTFS-RT][database] Salvando ${records.length} registros em gps_sentido`);
 
     for (let i = 0; i < records.length; i += BATCH_SIZE) {
         const batch = records.slice(i, i + BATCH_SIZE);
@@ -242,7 +239,6 @@ async function saveGtfsToGpsSentido(records) {
         infoMessage: `${totalSaved} registros salvos em gps_sentido`
     });
 
-    console.log(`[GTFS-RT][database] Salvamento concluído: ${totalSaved} registros em gps_sentido`);
 }
 
 /**

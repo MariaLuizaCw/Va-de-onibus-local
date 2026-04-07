@@ -14,7 +14,7 @@
     import DatePicker from '$lib/components/DatePicker.svelte';
 
     const store = appStore;
-    const { setCity, setLine, login, logout, fetchRoute, loadStats, loadGtfsCompanies } = store;
+    const { setCity, setLine, login, logout, fetchRoute, loadStats, loadGtfsCompanies, loadSsxCompanies } = store;
 
     // Configuração de retenção de logs (do .env ou 90 dias por padrão)
     const JOB_LOG_RETENTION_DAYS = Number(import.meta.env.PUBLIC_JOB_LOG_RETENTION_DAYS) || 90;
@@ -39,18 +39,21 @@
         ? timeline.filter(t => t.jobName === selectedSubtask.jobName)
         : timeline;
 
-    $: currentCityStats = $store.stats && !$store.isGtfsSource
+    $: currentCityStats = $store.stats && !$store.isGtfsSource && !$store.isSsxSource
         ? ($store.city === 'rio' ? $store.stats.rio : ($store.city === 'angra' ? $store.stats.angra : null)) 
         : null;
     $: cityLabel = $store.isGtfsSource 
         ? $store.city.toUpperCase() 
-        : ($store.city === 'rio' ? 'Rio de Janeiro' : ($store.city === 'angra' ? 'Angra dos Reis' : 'RioIta'));
+        : ($store.isSsxSource 
+            ? $store.ssxCompanies.find(c => c.key === $store.city)?.name || $store.city
+            : ($store.city === 'rio' ? 'Rio de Janeiro' : ($store.city === 'angra' ? 'Angra dos Reis' : 'RioIta')));
     $: searchFieldLabel = $store.city === 'rioita' ? 'Ordem' : 'Linha';
-    $: selectorLabel = $store.isGtfsSource ? 'Empresa' : 'Município';
+    $: selectorLabel = ($store.isGtfsSource || $store.isSsxSource) ? 'Empresa' : 'Município';
     
-    // Combinar cidades com empresas GTFS para o seletor
+    // Combinar cidades com empresas GTFS e SSX para o seletor
     $: allOptions = [
         ...cities,
+        ...$store.ssxCompanies.map(c => ({ id: c.key, label: `${c.name} (SSX)` })),
         ...$store.gtfsCompanies.map(c => ({ id: c, label: `${c} (GTFS)` }))
     ];
 
@@ -76,8 +79,9 @@
             availableDates = generateAvailableDates();
             loadJobStats();
             loadJobsConfig();
-            // Carregar empresas GTFS disponíveis (requer autenticação)
+            // Carregar empresas GTFS e SSX disponíveis (requer autenticação)
             loadGtfsCompanies();
+            loadSsxCompanies();
         }
     });
 
@@ -312,7 +316,7 @@
         {:else}
             <!-- Routes Explorer -->
             <div class="routes-dashboard">
-                {#if !$store.isGtfsSource}
+                {#if !$store.isGtfsSource && !$store.isSsxSource}
                     <StatsPanel stats={currentCityStats} loading={$store.statsLoading} cityLabel={cityLabel} />
                 {/if}
 
@@ -352,7 +356,7 @@
                             {/if}
                         </div>
 
-                        {#if $store.selectedLineStats && !$store.isGtfsSource}
+                        {#if $store.selectedLineStats && !$store.isGtfsSource && !$store.isSsxSource}
                             <div class="line-stats-inline">
                                 <div class="stat">
                                     <span class="label">Última atualização</span>
@@ -388,6 +392,21 @@
                                 <div class="stat">
                                     <span class="label">Empresa</span>
                                     <span class="value">{$store.city.toUpperCase()}</span>
+                                </div>
+                            </div>
+                        {:else if $store.isSsxSource && $store.tableData.length > 0}
+                            <div class="line-stats-inline">
+                                <div class="stat">
+                                    <span class="label">Fonte</span>
+                                    <span class="value">SSX</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Veículos</span>
+                                    <span class="value">{$store.tableData.length}</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="label">Empresa</span>
+                                    <span class="value">{$store.ssxCompanies.find(c => c.key === $store.city)?.name || $store.city}</span>
                                 </div>
                             </div>
                         {/if}

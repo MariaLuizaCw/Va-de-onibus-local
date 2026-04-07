@@ -47,7 +47,6 @@ async function fetchAvailableCompanies() {
         });
         
         const companies = response.data?.availableCompanies || [];
-        console.log(`[GTFS-RT] ${companies.length} empresas disponíveis`);
         return companies;
     } catch (error) {
         console.error('[GTFS-RT] Erro ao buscar empresas:', error.message);
@@ -72,7 +71,6 @@ async function fetchCompanyRoutes(company) {
         
         if (Array.isArray(routes)) {
             setCompanyRoutes(company, routes);
-            console.log(`[GTFS-RT][${company}] ${routes.length} rotas carregadas`);
         }
         
         const finishedAt = new Date();
@@ -123,7 +121,6 @@ async function fetchCompanyVehicles(company) {
         const data = response.data;
         const entities = data?.data?.entity || [];
         
-        console.log(`[GTFS-RT][${company}] ${entities.length} veículos recebidos`);
         
         const finishedAt = new Date();
         await logJobExecution({
@@ -175,7 +172,6 @@ async function fetchGtfsRoutesData(options = {}) {
         return;
     }
 
-    console.log('[GTFS-RT] Iniciando atualização de rotas...');
     
     const companies = await fetchAvailableCompanies();
     
@@ -188,7 +184,6 @@ async function fetchGtfsRoutesData(options = {}) {
         await fetchCompanyRoutes(company);
     }
 
-    console.log(`[GTFS-RT] Rotas atualizadas para ${companies.length} empresas`);
 }
 
 /**
@@ -201,7 +196,6 @@ async function fetchGtfsGPSData(options = {}) {
         return;
     }
 
-    console.log('[GTFS-RT] Iniciando fetch de veículos...');
     
     const companies = await fetchAvailableCompanies();
     
@@ -215,7 +209,6 @@ async function fetchGtfsGPSData(options = {}) {
     for (const company of companies) {
         // Verificar se temos rotas carregadas para esta empresa
         if (!hasCompanyRoutes(company)) {
-            console.log(`[GTFS-RT][${company}] Sem rotas carregadas, buscando...`);
             await fetchCompanyRoutes(company);
         }
 
@@ -225,7 +218,6 @@ async function fetchGtfsGPSData(options = {}) {
 
         // Deduplicar veículos
         const deduplicated = deduplicateByVehicleId(result.entities);
-        console.log(`[GTFS-RT][${company}] ${deduplicated.length} veículos após deduplicação`);
 
         // Enriquecer com número da linha
         let enriched = await enrichVehicles(company, deduplicated);
@@ -240,7 +232,6 @@ async function fetchGtfsGPSData(options = {}) {
         // Salvar no banco se solicitado
         if (options.saveToGpsSentido) {
             saveGtfsToGpsSentido(enriched)
-                .then(() => console.log(`[GTFS-RT][${company}] GPS salvo em gps_sentido`))
                 .catch(err => console.error(`[GTFS-RT][${company}] Erro ao salvar GPS:`, err.message));
         }
         
@@ -252,7 +243,6 @@ async function fetchGtfsGPSData(options = {}) {
         totalVehicles += enriched.length;
     }
 
-    console.log(`[GTFS-RT] Total: ${totalVehicles} veículos processados de ${companies.length} empresas`);
 }
 
 module.exports = {
