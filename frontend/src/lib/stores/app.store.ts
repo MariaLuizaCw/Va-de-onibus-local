@@ -30,7 +30,7 @@ type AppState = {
     loginLoading: boolean;
     loginError: string | null;
     preferredSortFields: string[];
-    stats: { rio: CityStats; angra: CityStats } | null;
+    stats: { rio: CityStats } | null;
     statsLoading: boolean;
     selectedLineStats: LineStats | null;
     // GTFS
@@ -186,8 +186,7 @@ function createAppStore() {
                 ]);
                 records = routeRecords;
                 stats = fetchedStats;
-                const cityStats = state.city === 'rio' ? stats.rio : stats.angra;
-                lineStats = cityStats.lines.find((l) => l.linha === trimmedLine) || null;
+                lineStats = stats.rio.lines.find((l) => l.linha === trimmedLine) || null;
             }
 
             const timestamp = new Date().toLocaleTimeString();
@@ -245,8 +244,7 @@ function createAppStore() {
             return;
         }
 
-        const cityStats = state.city === 'rio' ? state.stats.rio : state.stats.angra;
-        const lineStats = cityStats.lines.find((l) => l.linha === linha) || null;
+        const lineStats = state.stats.rio.lines.find((l) => l.linha === linha) || null;
         store.update((s) => ({ ...s, selectedLineStats: lineStats }));
     }
 

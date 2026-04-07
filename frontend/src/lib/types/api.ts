@@ -44,7 +44,6 @@ export type CityStats = {
 
 export type StatsResponse = {
     rio: CityStats;
-    angra: CityStats;
 };
 
 // Job Stats Types

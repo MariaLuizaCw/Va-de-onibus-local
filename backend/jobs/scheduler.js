@@ -1,12 +1,9 @@
 const cron = require('node-cron');
 const { fetchRioGPSData } = require('../fetchers/rioFetcher');
 const { fetchAngraGPSData, fetchCircularLines, fetchBarraPiraiGPSData, fetchPedroAntonioGPSData, fetchResendenseGPSData } = require('../fetchers/ssxFetcher');
-const { fetchRioItaGPSData } = require('../fetchers/rioItaFetcher');
 const { fetchGtfsRoutesData, fetchGtfsGPSData } = require('../fetchers/gtfsFetcher');
-const { syncRioSnapshot, syncAngraSnapshot, syncRioItaSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport, cleanupHistoricoViagens, processarViagensRio, cleanupRioGpsApiHistory, cleanupUltimasPosicoes } = require('../database/index');
+const { syncRioSnapshot, cleanupHistoricoViagens, processarViagensRio, cleanupRioGpsApiHistory, cleanupUltimasPosicoes } = require('../database/index');
 const { getRioOnibus, replaceRioOnibusSnapshot } = require('../stores/rioOnibusStore');
-const { getAngraOnibus, replaceAngraOnibusSnapshot } = require('../stores/angraOnibusStore');
-const { getRioItaOnibus, replaceRioItaOnibusSnapshot } = require('../stores/rioItaStore');
 const { loadItinerarioIntoMemory } = require('../stores/itinerarioStore');
 const { logJobExecution, deleteOldJobExecutions } = require('../database/jobLogs');
 const jobsConfig = require('../common_settings/jobs.json');
@@ -15,18 +12,13 @@ const scheduledTasks = new Map();
 
 const handlers = {
     loadItinerarioIntoMemory,
-    generateSentidoCoverageReport,
-    generateAngraRouteTypeReport,
     fetchRioGPSData: (data = {}) => fetchRioGPSData(data),
     fetchAngraGPSData: (data = {}) => fetchAngraGPSData(data),
     fetchBarraPiraiGPSData: (data = {}) => fetchBarraPiraiGPSData(data),
     fetchPedroAntonioGPSData: (data = {}) => fetchPedroAntonioGPSData(data),
     fetchResendenseGPSData: (data = {}) => fetchResendenseGPSData(data),
-    fetchRioItaGPSData: (data = {}) => fetchRioItaGPSData(data),
     fetchCircularLines,
     syncRioSnapshot: () => syncRioSnapshot(getRioOnibus, replaceRioOnibusSnapshot),
-    syncAngraSnapshot: () => syncAngraSnapshot(getAngraOnibus, replaceAngraOnibusSnapshot),
-    syncRioItaSnapshot: () => syncRioItaSnapshot(getRioItaOnibus, replaceRioItaOnibusSnapshot),
     deleteOldJobExecutions,
     cleanupHistoricoViagens,
     cleanupRioGpsApiHistory,

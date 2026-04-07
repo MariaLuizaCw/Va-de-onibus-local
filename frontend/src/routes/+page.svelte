@@ -39,15 +39,15 @@
         ? timeline.filter(t => t.jobName === selectedSubtask.jobName)
         : timeline;
 
-    $: currentCityStats = $store.stats && !$store.isGtfsSource && !$store.isSsxSource
-        ? ($store.city === 'rio' ? $store.stats.rio : ($store.city === 'angra' ? $store.stats.angra : null)) 
+    $: currentCityStats = $store.stats && !$store.isGtfsSource && !$store.isSsxSource && $store.city === 'rio'
+        ? $store.stats.rio
         : null;
     $: cityLabel = $store.isGtfsSource 
         ? $store.city.toUpperCase() 
         : ($store.isSsxSource 
             ? $store.ssxCompanies.find(c => c.key === $store.city)?.name || $store.city
-            : ($store.city === 'rio' ? 'Rio de Janeiro' : ($store.city === 'angra' ? 'Angra dos Reis' : 'RioIta')));
-    $: searchFieldLabel = $store.city === 'rioita' ? 'Ordem' : 'Linha';
+            : 'Rio de Janeiro');
+    $: searchFieldLabel = 'Linha';
     $: selectorLabel = ($store.isGtfsSource || $store.isSsxSource) ? 'Empresa' : 'Município';
     
     // Combinar cidades com empresas GTFS e SSX para o seletor
@@ -325,7 +325,7 @@
                         <p class="eyebrow">Dashboard API</p>
                         <h1>Explore rotas do backend em tempo real</h1>
                         <p class="lead">
-                            Escolha o município ou empresa GTFS, informe a linha pesquisada e visualize instantaneamente os dados retornados pela API.
+                            Escolha o município, empresa GTFS ou SSX, informe a linha pesquisada e visualize instantaneamente os dados retornados pela API.
                         </p>
                     </div>
 

@@ -15,9 +15,7 @@ export class UnauthorizedError extends Error {
 }
 
 const cities: CityOption[] = [
-    { id: 'rio', label: 'Rio' },
-    { id: 'angra', label: 'Angra dos Reis' },
-    { id: 'rioita', label: 'RioIta' }
+    { id: 'rio', label: 'Rio de Janeiro' }
 ];
 
 // SSX Companies API (Angra, BarraPirai, PedroAntonio, Resendense)
@@ -97,6 +95,75 @@ export async function fetchGtfsCompanies(token: string): Promise<string[]> {
     return data.companies || [];
 }
 
+// Achata registros GTFS expandindo _enriched e vehicle em colunas separadas
+function flattenGtfsRecord(record: Record<string, unknown>): ApiRecord {
+    const flat: Record<string, unknown> = {};
+    
+    // Extrair campos de _enriched
+    const enriched = record._enriched as Record<string, unknown> | undefined;
+    if (enriched) {
+        flat.linha = enriched.numeroLinha;
+        flat.sentido = enriched.sentido;
+        flat.routeId = enriched.routeId;
+        flat.directionId = enriched.directionId;
+        flat.itinerario_id = enriched.itinerario_id;
+        flat.route_name = enriched.route_name;
+        flat.company = enriched.company;
+    }
+    
+    // Extrair campos de vehicle
+    const vehicle = record.vehicle as Record<string, unknown> | undefined;
+    if (vehicle) {
+        // Dados do veículo
+        const vehicleInfo = vehicle.vehicle as Record<string, unknown> | undefined;
+        if (vehicleInfo) {
+            flat.ordem = vehicleInfo.id;
+            flat.placa = vehicleInfo.licensePlate;
+            flat.label = vehicleInfo.label;
+        }
+        
+        // Posição
+        const position = vehicle.position as Record<string, unknown> | undefined;
+        if (position) {
+            flat.latitude = position.latitude;
+            flat.longitude = position.longitude;
+            flat.velocidade = position.speed;
+            flat.bearing = position.bearing;
+        }
+        
+        // Timestamp
+        if (vehicle.timestamp) {
+            flat.timestamp = vehicle.timestamp;
+        }
+        if (vehicle.formattedTimestamp) {
+            flat.datahora = vehicle.formattedTimestamp;
+        }
+        
+        // Trip info
+        const trip = vehicle.trip as Record<string, unknown> | undefined;
+        if (trip) {
+            flat.tripId = trip.tripId;
+            flat.startTime = trip.startTime;
+            flat.startDate = trip.startDate;
+        }
+        
+        // Status
+        if (vehicle.currentStatus) {
+            flat.status = vehicle.currentStatus;
+        }
+        if (vehicle.stopId) {
+            flat.stopId = vehicle.stopId;
+        }
+    }
+    
+    // Manter id original se existir
+    if (record.id) {
+        flat.vehicleId = record.id;
+    }
+    
+    return flat as ApiRecord;
+}
+
 export async function fetchGtfsRouteData(empresa: string, linha: string, token: string): Promise<ApiRecord[]> {
     const response = await fetch(`${BACKEND_BASE_URL}/gtfs_onibus`, {
         method: 'POST',
@@ -117,7 +184,10 @@ export async function fetchGtfsRouteData(empresa: string, linha: string, token: 
     }
 
     const payload = await response.json();
-    return payload.positions || [];
+    const positions = payload.positions || [];
+    
+    // Achatar registros GTFS para exibição na tabela
+    return positions.map(flattenGtfsRecord);
 }
 
 function normalizeRecords(payload: RawResponse, targetKey: string): ApiRecord[] {
@@ -179,10 +249,7 @@ export async function login(credentials: LoginCredentials): Promise<AuthResponse
 }
 
 export async function fetchRouteData(city: string, searchValue: string, token: string): Promise<ApiRecord[]> {
-    // RioIta usa 'ordem' como parâmetro de busca, outros usam 'linha'
-    const bodyParam = city === 'rioita' 
-        ? { ordem: searchValue }
-        : { linha: searchValue };
+    const bodyParam = { linha: searchValue };
 
     const response = await fetch(`${BACKEND_BASE_URL}/${city}_onibus`, {
         method: 'POST',

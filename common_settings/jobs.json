@@ -75,32 +75,11 @@
       "runOnStartup": true
     },
     {
-      "name": "cleanup-historico-viagens",
-      "handler": "cleanupHistoricoViagens",
-      "cron": "0 2 * * *",
-      "description": "Remove histórico de viagens antigos (mantém 1 mês) - executa diariamente às 2h",
-      "runOnStartup": false
-    },
-    {
-      "name": "cleanup-rio-gps-api-history",
-      "handler": "cleanupRioGpsApiHistory",
-      "cron": "0 * * * *",
-      "description": "Remove histórico bruto da API Rio GPS com mais de 7 dias - executa a cada 1 hora",
-      "runOnStartup": false
-    },
-    {
       "name": "cleanup-ultimas-posicoes",
       "handler": "cleanupUltimasPosicoes",
       "cron": "0 * * * *",
       "description": "Remove registros antigos da tabela auxiliar de últimas posições (retenção: 2h) - executa a cada 1 hora",
       "runOnStartup": false
-    },
-     {
-      "name": "gtfs-routes-refresh",
-      "handler": "fetchGtfsRoutesData",
-      "cron": "0 4 * * *",
-      "description": "Atualiza rotas GTFS-RT de todas as empresas 1 vez por dia às 4h",
-      "runOnStartup": true
     },
     {
       "name": "gtfs-gps-fetch",

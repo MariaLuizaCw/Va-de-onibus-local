@@ -1,10 +1,8 @@
 const { dbPool } = require('./pool');
 
-// Flags para controlar se já foi feito o load inicial
+// Flag para controlar se já foi feito o load inicial
 const loadedSnapshots = {
-    rio: false,
-    angra: false,
-    rioita: false
+    rio: false
 };
 
 async function loadOnibusSnapshot(city = 'rio') {
@@ -39,14 +37,6 @@ async function saveRioOnibusSnapshot(snapshot) {
     return saveOnibusSnapshot(snapshot, 'rio');
 }
 
-async function loadLatestAngraOnibusSnapshot() {
-    return loadOnibusSnapshot('angra');
-}
-
-async function saveAngraOnibusSnapshot(snapshot) {
-    return saveOnibusSnapshot(snapshot, 'angra');
-}
-
 // Funções combinadas: load na primeira execução, save nas seguintes
 async function syncRioSnapshot(getSnapshotFn, replaceSnapshotFn) {
     if (!loadedSnapshots.rio) {
@@ -65,48 +55,10 @@ async function syncRioSnapshot(getSnapshotFn, replaceSnapshotFn) {
     }
 }
 
-async function syncAngraSnapshot(getSnapshotFn, replaceSnapshotFn) {
-    if (!loadedSnapshots.angra) {
-        console.log('[snapshot][angra] Primeira execução - carregando snapshot do banco...');
-        const snapshot = await loadOnibusSnapshot('angra');
-        if (snapshot && replaceSnapshotFn) {
-            replaceSnapshotFn(snapshot);
-            console.log('[snapshot][angra] Snapshot carregado com sucesso');
-        } else {
-            console.log('[snapshot][angra] Nenhum snapshot encontrado no banco');
-        }
-        loadedSnapshots.angra = true;
-    } else {
-        const snapshot = getSnapshotFn ? getSnapshotFn() : null;
-        await saveOnibusSnapshot(snapshot, 'angra');
-    }
-}
-
-async function syncRioItaSnapshot(getSnapshotFn, replaceSnapshotFn) {
-    if (!loadedSnapshots.rioita) {
-        console.log('[snapshot][rioita] Primeira execução - carregando snapshot do banco...');
-        const snapshot = await loadOnibusSnapshot('rioita');
-        if (snapshot && replaceSnapshotFn) {
-            replaceSnapshotFn(snapshot);
-            console.log('[snapshot][rioita] Snapshot carregado com sucesso');
-        } else {
-            console.log('[snapshot][rioita] Nenhum snapshot encontrado no banco');
-        }
-        loadedSnapshots.rioita = true;
-    } else {
-        const snapshot = getSnapshotFn ? getSnapshotFn() : null;
-        await saveOnibusSnapshot(snapshot, 'rioita');
-    }
-}
-
 module.exports = {
     loadOnibusSnapshot,
     saveOnibusSnapshot,
     loadLatestRioOnibusSnapshot,
     saveRioOnibusSnapshot,
-    loadLatestAngraOnibusSnapshot,
-    saveAngraOnibusSnapshot,
     syncRioSnapshot,
-    syncAngraSnapshot,
-    syncRioItaSnapshot,
 };

@@ -13,20 +13,15 @@ const {
     upsertGpsSentidoBatch,
     cleanupUltimasPosicoes,
 } = require('./rio');
-const { enrichSsxRecordsWithSentido, saveSsxToGpsSentido, enrichAngraRecordsWithSentido, saveAngraToGpsSentido } = require('./ssx');
+const { enrichSsxRecordsWithSentido, saveSsxToGpsSentido } = require('./ssx');
 const { enrichGtfsRecordsWithSentido, saveGtfsToGpsSentido, identificarSentido, enrichVehicles } = require('./gtfs');
 const { 
     loadOnibusSnapshot, 
     saveOnibusSnapshot, 
     loadLatestRioOnibusSnapshot, 
     saveRioOnibusSnapshot,
-    loadLatestAngraOnibusSnapshot,
-    saveAngraOnibusSnapshot,
-    syncRioSnapshot,
-    syncAngraSnapshot,
-    syncRioItaSnapshot
+    syncRioSnapshot
 } = require('./snapshots');
-const { generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./reports');
 
 module.exports = {
     dbPool,
@@ -45,21 +40,15 @@ module.exports = {
     // SSX (Angra, Barra do Piraí, Pedro Antônio, Resendense)
     enrichSsxRecordsWithSentido,
     saveSsxToGpsSentido,
-    enrichAngraRecordsWithSentido,
-    saveAngraToGpsSentido,
+    // GTFS
     enrichGtfsRecordsWithSentido,
     saveGtfsToGpsSentido,
     identificarSentido,
     enrichVehicles,
+    // Snapshots (apenas Rio)
     saveOnibusSnapshot,
     loadOnibusSnapshot,
     saveRioOnibusSnapshot,
     loadLatestRioOnibusSnapshot,
-    saveAngraOnibusSnapshot,
-    loadLatestAngraOnibusSnapshot,
     syncRioSnapshot,
-    syncAngraSnapshot,
-    syncRioItaSnapshot,
-    generateSentidoCoverageReport,
-    generateAngraRouteTypeReport,
 };

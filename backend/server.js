@@ -3,13 +3,11 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const { fetchRioGPSData } = require('./fetchers/rioFetcher');
 const { fetchAngraGPSData, fetchCircularLines, getCompanyVehicles: getSsxVehicles, getLineLastPositions: getSsxLineLastPositions, getLoadedCompanies: getSsxLoadedCompanies, getStoreStatus: getSsxStoreStatus, SSX_INTEGRATIONS } = require('./fetchers/ssxFetcher');
-const { loadLatestRioOnibusSnapshot, loadLatestAngraOnibusSnapshot, generateSentidoCoverageReport, generateAngraRouteTypeReport } = require('./database/index');
+const { loadLatestRioOnibusSnapshot } = require('./database/index');
 const { getRioOnibus, getLineLastPositions: getRioLineLastPositions, replaceRioOnibusSnapshot } = require('./stores/rioOnibusStore');
-const { getAngraOnibus, getLineLastPositions: getAngraLineLastPositions, replaceAngraOnibusSnapshot } = require('./stores/angraOnibusStore');
-const { getRioItaOnibus, getLastPositions: getRioItaLastPositions, replaceRioItaOnibusSnapshot } = require('./stores/rioItaStore');
 const { getCompanyVehicles: getGtfsVehicles, getLineLastPositions: getGtfsLineLastPositions, getStoreStatus: getGtfsVehiclesStatus } = require('./stores/gtfsVehiclesStore');
 const { getCompanyRoutes: getGtfsRoutes, getStoreStatus: getGtfsRoutesStatus, getLoadedCompanies: getGtfsLoadedCompanies } = require('./stores/gtfsRoutesStore');
-const { resolveRioTimestamp, resolveAngraTimestamp, summarizeLines } = require('./utils/stats');
+const { resolveRioTimestamp, summarizeLines } = require('./utils/stats');
 const { loadItinerarioIntoMemory } = require('./stores/itinerarioStore');
 const { startScheduler, stopScheduler } = require('./jobs');
 const { getJobStats, getJobTimeline, getJobHourlyDistribution } = require('./database/jobStats');
@@ -108,10 +106,8 @@ router.get('/gtfs/status', (req, res) => {
 
 router.get('/stats/lines', (req, res) => {
     const rioStats = summarizeLines(getRioOnibus(), resolveRioTimestamp);
-    const angraStats = summarizeLines(getAngraOnibus(), resolveAngraTimestamp);
     return res.json({
-        rio: rioStats,
-        angra: angraStats
+        rio: rioStats
     });
 });
 
@@ -125,30 +121,6 @@ router.post('/rio_onibus', (req, res) => {
     }
 
     return res.json(getRioOnibus());
-});
-
-// Angra endpoints
-router.post('/angra_onibus', (req, res) => {
-    const { linha } = req.body || {};
-
-    if (linha != null && String(linha).trim() !== '') {
-        const ordens = getAngraLineLastPositions(linha);
-        return res.json({ linha: String(linha), ordens });
-    }
-
-    return res.json(getAngraOnibus());
-});
-
-// RioIta endpoints - busca por ordem (Prefixo)
-router.post('/rioita_onibus', (req, res) => {
-    const { ordem } = req.body || {};
-
-    if (ordem != null && String(ordem).trim() !== '') {
-        const positions = getRioItaLastPositions(ordem);
-        return res.json({ ordem: String(ordem), positions });
-    }
-
-    return res.json(getRioItaOnibus());
 });
 
 // GTFS-RT endpoint (autenticado)

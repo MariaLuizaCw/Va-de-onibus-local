@@ -109,19 +109,41 @@ if [ -d "$SEEDS_DIR" ]; then
     echo "▶ Carregando dados de seed..."
     
     for SEED_FILE in $SEED_FILES; do
-      echo "▶ Carregando $(basename "$SEED_FILE")"
+      # Extrair nome da tabela do arquivo (ex: clusters_parada_resultado_data.sql -> clusters_parada_resultado)
+      TABLE_NAME=$(basename "$SEED_FILE" .sql | sed 's/_data$//')
+      
+      echo "▶ Carregando $(basename "$SEED_FILE") (truncando $TABLE_NAME)"
       
       if [[ "$MODE" == "container" ]]; then
+        # Truncar tabela antes de inserir
         sudo docker exec -i \
           -e PGPASSWORD="$DB_PASSWORD" \
           "$POSTGRES_CONTAINER_NAME" \
-          psql \
+          psql -q \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
+            -c "TRUNCATE TABLE $TABLE_NAME CASCADE;"
+        
+        # Carregar seed com -q para suprimir logs de INSERT
+        sudo docker exec -i \
+          -e PGPASSWORD="$DB_PASSWORD" \
+          "$POSTGRES_CONTAINER_NAME" \
+          psql -q \
             -U "$DB_USER" \
             -d "$DB_NAME" \
             -v ON_ERROR_STOP=1 \
             < "$SEED_FILE"
       else
-        PGPASSWORD="$DB_PASSWORD" psql \
+        # Truncar tabela antes de inserir
+        PGPASSWORD="$DB_PASSWORD" psql -q \
+          -h "$DB_HOST" \
+          -p "$DB_PORT" \
+          -U "$DB_USER" \
+          -d "$DB_NAME" \
+          -c "TRUNCATE TABLE $TABLE_NAME CASCADE;"
+        
+        # Carregar seed com -q para suprimir logs de INSERT
+        PGPASSWORD="$DB_PASSWORD" psql -q \
           -h "$DB_HOST" \
           -p "$DB_PORT" \
           -U "$DB_USER" \
