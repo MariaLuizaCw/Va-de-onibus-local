@@ -15,7 +15,7 @@
       "options": {
         "atualizarUltimasPosicoes": true,
         "saveToGpsSentido": true,
-        "processarViagens": true,
+        "processarViagens": false,
         "updateInMemoryStore": true,
         "saveRawHistory": false
       }

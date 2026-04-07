@@ -43,6 +43,7 @@ done
 POSTGRES_CONTAINER_NAME=vadeonibus-db
 
 SQL_DIRS=("database/functions" "database/creates")
+SEEDS_DIR="database/seeds"
 
 # Verificar se os diretórios existem
 for SQL_DIR in "${SQL_DIRS[@]}"; do
@@ -98,3 +99,39 @@ done
 
 echo ""
 echo "✅ Todos os scripts SQL (creates + functions) foram aplicados com sucesso!"
+
+# Carregar dados de seed se existirem
+if [ -d "$SEEDS_DIR" ]; then
+  SEED_FILES=$(ls "$SEEDS_DIR"/*.sql 2>/dev/null | sort || true)
+  
+  if [ -n "$SEED_FILES" ]; then
+    echo ""
+    echo "▶ Carregando dados de seed..."
+    
+    for SEED_FILE in $SEED_FILES; do
+      echo "▶ Carregando $(basename "$SEED_FILE")"
+      
+      if [[ "$MODE" == "container" ]]; then
+        sudo docker exec -i \
+          -e PGPASSWORD="$DB_PASSWORD" \
+          "$POSTGRES_CONTAINER_NAME" \
+          psql \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
+            -v ON_ERROR_STOP=1 \
+            < "$SEED_FILE"
+      else
+        PGPASSWORD="$DB_PASSWORD" psql \
+          -h "$DB_HOST" \
+          -p "$DB_PORT" \
+          -U "$DB_USER" \
+          -d "$DB_NAME" \
+          -v ON_ERROR_STOP=1 \
+          < "$SEED_FILE"
+      fi
+    done
+    
+    echo ""
+    echo "✅ Dados de seed carregados com sucesso!"
+  fi
+fi
