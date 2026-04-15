@@ -21,17 +21,22 @@ O arquivo `.env` fornecido já contém as configurações principais. Verifique 
 - `GTFSRTURL`: URL base da API GTFS-RT (ex: `http://localhost:3333` ou `https://seu-servidor-gtfs.com`) 
 
 
-### 3. Importação das Functions do Banco
+### 3. Configuração do Banco de Dados
 
-O backend depende de functions PostgreSQL. Importe manualmente os arquivos essenciais:
+O backend depende de tabelas e functions PostgreSQL. Use o script `apply-functions.sh` para aplicar automaticamente todos os arquivos SQL dos diretórios `database/creates/`, `database/functions/` e `database/seeds/` (se existir).
 
-**Functions essenciais para os jobs de Angra:**
-- `database/functions/angra.sql`
-- `database/functions/itinerarioStore.sql`
+#### Uso do Script
 
-**Para importar todas as functions:**
+```bash
+./scripts/apply-functions.sh [container|remote]
+```
 
-O script `apply-functions.sh` suporta dois modos de execução:
+| Parâmetro | Descrição |
+|-----------|-----------|
+| `container` | **(padrão)** Executa via `docker exec` no container Postgres local (`vadeonibus-db`) |
+| `remote` | Conecta diretamente a um banco PostgreSQL remoto via `psql` |
+
+#### Exemplos
 
 **Modo Container (padrão):**
 ```bash
@@ -39,17 +44,27 @@ O script `apply-functions.sh` suporta dois modos de execução:
 # ou simplesmente
 ./scripts/apply-functions.sh
 ```
-Executa as functions via `docker exec` no container Postgres local.
 
 **Modo Remoto:**
 ```bash
 ./scripts/apply-functions.sh remote
 ```
-Conecta diretamente a um banco PostgreSQL em outra máquina na rede.
 
-**Variáveis necessárias no .env:**
-- **Modo container**: `DB_NAME`, `DB_USER`, `DB_PASSWORD`
-- **Modo remote**: `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`
+#### Variáveis de Ambiente Necessárias (.env)
+
+| Variável | Container | Remote | Descrição |
+|----------|:---------:|:------:|-----------|
+| `DB_NAME` | ✓ | ✓ | Nome do banco de dados |
+| `DB_USER` | ✓ | ✓ | Usuário do banco |
+| `DB_PASSWORD` | ✓ | ✓ | Senha do banco |
+| `DB_HOST` | | ✓ | Host do banco remoto |
+| `DB_PORT` | | ✓ | Porta do banco remoto |
+
+#### O que o script faz
+
+1. Carrega as variáveis do arquivo `.env`
+2. Executa todos os arquivos `.sql` de `database/creates/` e `database/functions/` (em ordem alfabética)
+3. Se existir o diretório `database/seeds/`, carrega os dados de seed (truncando as tabelas antes)
 
 ### 4. Execução dos Serviços
 
