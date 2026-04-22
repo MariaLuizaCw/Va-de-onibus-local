@@ -1,9 +1,8 @@
 -- Table: public.gps_historico_viagens
 -- Armazena viagens completas inferidas a partir de passagens por terminais
 
--- DROP TABLE IF EXISTS public.gps_historico_viagens;
 
-CREATE TABLE IF NOT EXISTS public.gps_historico_viagens (
+CREATE TABLE public.gps_historico_viagens (
     id SERIAL PRIMARY KEY,
     ordem TEXT NOT NULL,
     token TEXT NOT NULL,

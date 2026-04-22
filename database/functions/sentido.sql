@@ -103,7 +103,9 @@ CREATE OR REPLACE FUNCTION fn_processar_sentido_batch(
     p_records jsonb,
     p_max_distancia_rota_metros numeric DEFAULT 300,
     p_min_pontos_para_score integer DEFAULT 2,
-    p_raio_inicio_itinerario_metros numeric DEFAULT 100
+    p_raio_inicio_itinerario_metros numeric DEFAULT 100,
+    p_fallback_diff_min numeric DEFAULT 0.01,
+    p_fallback_diff_max numeric DEFAULT 0.2
 ) RETURNS TABLE (
     ordem text,
     linha text,
@@ -307,6 +309,57 @@ melhor_score AS (
 ),
 
 -- ============================================================================
+-- ETAPA 5b: DIFERENÇA ENTRE OS 2 MELHORES SCORES
+-- Se diff < 0.2 → scores ambíguos, usar fallback da ultima_passagem
+-- ============================================================================
+
+scores_ranked AS (
+    SELECT *,
+        ROW_NUMBER() OVER (
+            PARTITION BY ordem, linha
+            ORDER BY score_final DESC, dist_media_metros ASC, corr_avanco DESC, itinerario_id ASC
+        ) AS rn
+    FROM metricas_com_score
+),
+
+score_diferenca AS (
+    SELECT
+        s1.ordem,
+        s1.linha,
+        s1.score_final - COALESCE(s2.score_final, 0) AS diff_scores
+    FROM scores_ranked s1
+    LEFT JOIN scores_ranked s2
+        ON s1.ordem = s2.ordem AND s1.linha = s2.linha AND s2.rn = 2
+    WHERE s1.rn = 1
+),
+
+-- ============================================================================
+-- ETAPA 5c: FALLBACK DA ÚLTIMA PASSAGEM (gps_ultima_passagem)
+-- Válido se: atualização <= 15min E identificação <= 5h
+-- Usado quando score diff < 0.2 (ambiguidade entre sentidos)
+-- ============================================================================
+
+fallback_ultima_passagem AS (
+    SELECT
+        gup.ordem,
+        gup.linha,
+        gup.sentido,
+        gup.itinerario_id,
+        gup.metodo_detecao AS metodo_detecao_fallback,
+        gup.label_ultima_passagem,
+        gup.datahora_identificacao,
+        gup.datahora_atualizacao,
+        it.route_name AS route_name_fallback
+    FROM gps_ultima_passagem gup
+    INNER JOIN registros_entrada reg ON reg.ordem = gup.ordem AND reg.linha = gup.linha
+    LEFT JOIN public.itinerario it ON it.id = gup.itinerario_id
+    WHERE gup.sentido IS NOT NULL
+      AND gup.label_ultima_passagem = 'Terminal'
+      AND NOW() - gup.datahora_atualizacao <= INTERVAL '15 minutes'
+      AND NOW() - gup.datahora_identificacao <= INTERVAL '5 hours'
+),
+
+-- ============================================================================
 -- ETAPA 6: DISTÂNCIA DO PONTO ATUAL À ROTA MAIS PRÓXIMA
 -- ============================================================================
 
@@ -323,8 +376,9 @@ distancia_ponto_atual AS (
 
 -- ============================================================================
 -- ETAPA 7: RESULTADO CONSOLIDADO
--- Une terminal + score + distância e determina método e sentido final
--- Prioridade: em_terminal > sem_historico > poucos_pontos > garagem > score
+-- Une terminal + score + distância + fallback e determina método e sentido final
+-- Prioridade: em_terminal > sem_historico > poucos_pontos > garagem
+--             > fallback_ultima_passagem (se diff < 0.2) > score
 -- ============================================================================
 
 resultado AS (
@@ -342,6 +396,7 @@ resultado AS (
             WHEN sc.ordem IS NULL                       THEN 'sem_historico'
             WHEN sc.num_pontos < p_min_pontos_para_score THEN 'poucos_pontos'
             WHEN dpa.dist_metros > p_max_distancia_rota_metros THEN 'garagem_por_distancia'
+            WHEN sd.diff_scores < p_fallback_diff_max AND sd.diff_scores > p_fallback_diff_min AND fup.ordem IS NOT NULL THEN 'fallback_ultima_passagem'
             ELSE 'score'
         END AS metodo_deteccao,
         
@@ -351,21 +406,24 @@ resultado AS (
             WHEN sc.ordem IS NULL                       THEN NULL
             WHEN sc.num_pontos < p_min_pontos_para_score THEN NULL
             WHEN dpa.dist_metros > p_max_distancia_rota_metros THEN 'GARAGEM'
+            WHEN sd.diff_scores < p_fallback_diff_max AND sd.diff_scores > p_fallback_diff_min AND fup.ordem IS NOT NULL THEN fup.sentido
             ELSE sc.sentido
         END AS sentido_determinado,
         
         -- Itinerário final
         CASE
             WHEN dt.tipo_deteccao_terminal IS NOT NULL  THEN dt.itinerario_id_terminal
-            WHEN sc.ordem IS NOT NULL
-                 AND sc.num_pontos >= p_min_pontos_para_score
-                 AND dpa.dist_metros <= p_max_distancia_rota_metros THEN sc.itinerario_id
-            ELSE NULL
+            WHEN sc.ordem IS NULL                       THEN NULL
+            WHEN sc.num_pontos < p_min_pontos_para_score THEN NULL
+            WHEN dpa.dist_metros > p_max_distancia_rota_metros THEN NULL
+            WHEN sd.diff_scores < p_fallback_diff_max AND sd.diff_scores > p_fallback_diff_min AND fup.ordem IS NOT NULL THEN fup.itinerario_id
+            ELSE sc.itinerario_id
         END AS itinerario_id_final,
         
-        -- Route name (terminal tem prioridade, fallback para score, depois linha)
+        -- Route name (terminal > fallback > score > linha)
         COALESCE(
             CASE WHEN dt.tipo_deteccao_terminal IS NOT NULL THEN dt.route_name_terminal END,
+            CASE WHEN sd.diff_scores < p_fallback_diff_max AND sd.diff_scores > p_fallback_diff_min AND fup.ordem IS NOT NULL THEN fup.route_name_fallback END,
             sc.route_name,
             reg.linha
         ) AS route_name,
@@ -390,12 +448,21 @@ resultado AS (
         sc.num_pontos,
         sc.dist_media_metros,
         sc.dist_stddev_metros,
-        sc.corr_avanco
+        sc.corr_avanco,
+        
+        -- Campos do fallback (para metadado)
+        fup.sentido AS fallback_sentido,
+        fup.itinerario_id AS fallback_itinerario_id,
+        fup.metodo_detecao_fallback,
+        fup.datahora_identificacao AS fallback_datahora_identificacao,
+        sd.diff_scores
         
     FROM registros_entrada reg
     LEFT JOIN deteccao_terminal dt ON dt.ordem = reg.ordem AND dt.linha = reg.linha
     LEFT JOIN melhor_score sc ON sc.ordem = reg.ordem AND sc.linha = reg.linha
     LEFT JOIN distancia_ponto_atual dpa ON dpa.ordem = reg.ordem AND dpa.linha = reg.linha
+    LEFT JOIN score_diferenca sd ON sd.ordem = reg.ordem AND sd.linha = reg.linha
+    LEFT JOIN fallback_ultima_passagem fup ON fup.ordem = reg.ordem AND fup.linha = reg.linha
 ),
 
 -- ============================================================================
@@ -490,6 +557,15 @@ SELECT
                 'dist_stddev_metros', ROUND(COALESCE(res.dist_stddev_metros, 0), 2),
                 'corr_avanco', ROUND(COALESCE(res.corr_avanco, 0), 4),
                 'score', ROUND(res.score_final, 4)
+            )
+            -- Fallback: scores ambíguos, usando última passagem em terminal
+            WHEN res.metodo_deteccao = 'fallback_ultima_passagem' THEN jsonb_build_object(
+                'ultima_passagem_sentido', res.fallback_sentido,
+                'ultima_passagem_itinerario_id', res.fallback_itinerario_id,
+                'ultima_passagem_metodo', res.metodo_detecao_fallback,
+                'datahora_identificacao', res.fallback_datahora_identificacao,
+                'diff_scores', ROUND(COALESCE(res.diff_scores, 0), 4),
+                'score_melhor', ROUND(res.score_final, 4)
             )
             -- Garagem: ônibus longe de qualquer rota
             WHEN res.metodo_deteccao = 'garagem_por_distancia' THEN jsonb_build_object(

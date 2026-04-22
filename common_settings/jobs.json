@@ -1,63 +1,17 @@
 {
   "jobs": [
     {
-      "name": "itinerario-refresh",
-      "handler": "loadItinerarioIntoMemory",
-      "cron": "0 */6 * * *",
-      "description": "Atualiza cache do itinerário a cada 6 horas",
-      "runOnStartup": true
-    },
-    {
       "name": "rio-gps-fetch",
       "handler": "fetchRioGPSData",
       "cron": "0 * * * * *",
       "description": "Busca dados GPS do Rio a cada 1 minuto e atualiza as tabelas",
       "options": {
         "atualizarUltimasPosicoes": true,
+        "saveToGpsUltimaPassagem": true,
         "saveToGpsSentido": true,
-        "processarViagens": false,
+        "processarViagens": true,
         "updateInMemoryStore": true,
         "saveRawHistory": false
-      }
-    },
-    {
-      "name": "angra-gps-fetch",
-      "handler": "fetchAngraGPSData",
-      "cron": "*/15 * * * * *",
-      "description": "Busca dados GPS de Angra (Bonfim) a cada 15 segundos",
-      "options": {
-        "saveToGpsSentido": true,
-        "updateInMemoryStore": true
-      }
-    },
-    {
-      "name": "barrapirai-gps-fetch",
-      "handler": "fetchBarraPiraiGPSData",
-      "cron": "*/15 * * * * *",
-      "description": "Busca dados GPS de Barra do Piraí a cada 15 segundos",
-      "options": {
-        "saveToGpsSentido": true,
-        "updateInMemoryStore": true
-      }
-    },
-    {
-      "name": "pedroantonio-gps-fetch",
-      "handler": "fetchPedroAntonioGPSData",
-      "cron": "*/15 * * * * *",
-      "description": "Busca dados GPS de Pedro Antônio a cada 15 segundos",
-      "options": {
-        "saveToGpsSentido": true,
-        "updateInMemoryStore": true
-      }
-    },
-    {
-      "name": "resendense-gps-fetch",
-      "handler": "fetchResendenseGPSData",
-      "cron": "*/15 * * * * *",
-      "description": "Busca dados GPS de Resendense a cada 15 segundos",
-      "options": {
-        "saveToGpsSentido": true,
-        "updateInMemoryStore": true
       }
     },
     {
@@ -68,29 +22,11 @@
       "runOnStartup": true
     },
     {
-      "name": "gtfs-routes-refresh",
-      "handler": "fetchGtfsRoutesData",
-      "cron": "0 4 * * *",
-      "description": "Atualiza rotas GTFS-RT de todas as empresas 1 vez por dia às 4h",
-      "runOnStartup": true
-    },
-    {
       "name": "cleanup-ultimas-posicoes",
       "handler": "cleanupUltimasPosicoes",
       "cron": "0 * * * *",
       "description": "Remove registros antigos da tabela auxiliar de últimas posições (retenção: 2h) - executa a cada 1 hora",
       "runOnStartup": false
-    },
-    {
-      "name": "gtfs-gps-fetch",
-      "handler": "fetchGtfsGPSData",
-      "cron": "0 * * * * *",
-      "description": "Busca dados GPS GTFS-RT de todas as empresas a cada 1 minuto",
-      "options": {
-        "updateInMemoryStore": true,
-        "identificarSentido": true,
-        "saveToGpsSentido": true
-      }
     }
   ]
 }

@@ -90,61 +90,24 @@ $$;
 -- -----------------------------------------------------------------------------
 -- fn_atualizar_ultima_passagem
 -- Atualiza a tabela gps_ultima_passagem com base em:
--- - PASSO 0: Invalida última passagem se ônibus está longe da rota (>200m)
 -- - REGRA TERMINAL (via clusters): Ponto dentro do buffer de cluster "Terminal"
 -- - REGRA GARAGEM: Ponto dentro do buffer de cluster "Garagem"
+-- Invalidação por distância é feita em fn_processar_sentido_batch (garagem_por_distancia)
 -- Usado por: rioFetcher.js -> processamento de última passagem
 -- -----------------------------------------------------------------------------
 
 
 CREATE OR REPLACE FUNCTION fn_atualizar_ultima_passagem(
-    p_points jsonb,
-    p_max_distancia_rota_metros numeric DEFAULT 200
+    p_points jsonb
 )
 RETURNS void
 LANGUAGE plpgsql
 AS $$
 BEGIN
     -- =========================================================================
-    -- PASSO 0: Invalidar última passagem se ônibus está longe da rota (>200m)
-    -- Quando em_terminal=FALSE e distância > threshold, limpa os campos
-    -- =========================================================================
-    WITH pts_invalidar AS (
-        SELECT
-            (r.value->>'ordem')::text AS ordem,
-            (r.value->>'linha')::text AS linha,
-            ST_SetSRID(
-                ST_MakePoint(
-                    (r.value->>'lon')::double precision,
-                    (r.value->>'lat')::double precision
-                ),
-                4326
-            ) AS geom
-        FROM jsonb_array_elements(p_points) r
-    ),
-    passagens_a_invalidar AS (
-        SELECT 
-            gup.ordem,
-            gup.linha
-        FROM gps_ultima_passagem gup
-        JOIN pts_invalidar pi ON pi.ordem = gup.ordem AND pi.linha = gup.linha
-        JOIN public.itinerario i ON i.id = gup.itinerario_id AND i.habilitado = true
-        WHERE gup.label_ultima_passagem = 'Terminal'
-          AND gup.em_terminal = FALSE
-          AND ST_Distance(pi.geom::geography, i.the_geom::geography) > p_max_distancia_rota_metros
-    )
-    UPDATE gps_ultima_passagem gup
-    SET 
-        label_ultima_passagem = NULL,
-        sentido = NULL,
-        itinerario_id = NULL,
-        metodo_detecao = NULL
-    FROM passagens_a_invalidar pai
-    WHERE gup.ordem = pai.ordem 
-      AND gup.linha = pai.linha;
-
-    -- =========================================================================
-    -- PASSO 1: Processar novas detecções de terminal/garagem
+    -- Processar novas detecções de terminal/garagem
+    -- A invalidação por distância à rota é feita em fn_processar_sentido_batch
+    -- (garagem_por_distancia quando dist > 300m)
     -- =========================================================================
     WITH pts AS (
         SELECT
@@ -275,33 +238,65 @@ BEGIN
         rf.em_terminal
     FROM resultado_final rf
     ON CONFLICT (ordem, linha) DO UPDATE SET
+        -- Sempre atualiza: datahora_atualizacao e em_terminal
         datahora_atualizacao = EXCLUDED.datahora_atualizacao,
-        -- Sempre atualiza em_terminal (TRUE se está, FALSE se saiu)
         em_terminal = EXCLUDED.em_terminal,
-        -- Só atualiza os outros campos se houver nova identificação
-        label_ultima_passagem = COALESCE(EXCLUDED.label_ultima_passagem, gps_ultima_passagem.label_ultima_passagem),
+        -- Campos imutáveis: só atualiza se for um NOVO terminal
+        -- Novo terminal = label/sentido/itinerario_id diferente do armazenado, ou registro anterior estava vazio
+        label_ultima_passagem = CASE 
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL AND (
+                gps_ultima_passagem.label_ultima_passagem IS NULL
+                OR gps_ultima_passagem.itinerario_id IS DISTINCT FROM EXCLUDED.itinerario_id
+                OR gps_ultima_passagem.sentido IS DISTINCT FROM EXCLUDED.sentido
+            ) THEN EXCLUDED.label_ultima_passagem
+            ELSE COALESCE(gps_ultima_passagem.label_ultima_passagem, EXCLUDED.label_ultima_passagem)
+        END,
         sentido = CASE 
-            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.sentido
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL AND (
+                gps_ultima_passagem.label_ultima_passagem IS NULL
+                OR gps_ultima_passagem.itinerario_id IS DISTINCT FROM EXCLUDED.itinerario_id
+                OR gps_ultima_passagem.sentido IS DISTINCT FROM EXCLUDED.sentido
+            ) THEN EXCLUDED.sentido
             ELSE gps_ultima_passagem.sentido
         END,
         itinerario_id = CASE 
-            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.itinerario_id
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL AND (
+                gps_ultima_passagem.label_ultima_passagem IS NULL
+                OR gps_ultima_passagem.itinerario_id IS DISTINCT FROM EXCLUDED.itinerario_id
+                OR gps_ultima_passagem.sentido IS DISTINCT FROM EXCLUDED.sentido
+            ) THEN EXCLUDED.itinerario_id
             ELSE gps_ultima_passagem.itinerario_id
         END,
         metodo_detecao = CASE 
-            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.metodo_detecao
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL AND (
+                gps_ultima_passagem.label_ultima_passagem IS NULL
+                OR gps_ultima_passagem.itinerario_id IS DISTINCT FROM EXCLUDED.itinerario_id
+                OR gps_ultima_passagem.sentido IS DISTINCT FROM EXCLUDED.sentido
+            ) THEN EXCLUDED.metodo_detecao
             ELSE gps_ultima_passagem.metodo_detecao
         END,
         lat_detecao = CASE 
-            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.lat_detecao
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL AND (
+                gps_ultima_passagem.label_ultima_passagem IS NULL
+                OR gps_ultima_passagem.itinerario_id IS DISTINCT FROM EXCLUDED.itinerario_id
+                OR gps_ultima_passagem.sentido IS DISTINCT FROM EXCLUDED.sentido
+            ) THEN EXCLUDED.lat_detecao
             ELSE gps_ultima_passagem.lat_detecao
         END,
         lon_detecao = CASE 
-            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.lon_detecao
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL AND (
+                gps_ultima_passagem.label_ultima_passagem IS NULL
+                OR gps_ultima_passagem.itinerario_id IS DISTINCT FROM EXCLUDED.itinerario_id
+                OR gps_ultima_passagem.sentido IS DISTINCT FROM EXCLUDED.sentido
+            ) THEN EXCLUDED.lon_detecao
             ELSE gps_ultima_passagem.lon_detecao
         END,
         datahora_identificacao = CASE 
-            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL THEN EXCLUDED.datahora_identificacao
+            WHEN EXCLUDED.label_ultima_passagem IS NOT NULL AND (
+                gps_ultima_passagem.label_ultima_passagem IS NULL
+                OR gps_ultima_passagem.itinerario_id IS DISTINCT FROM EXCLUDED.itinerario_id
+                OR gps_ultima_passagem.sentido IS DISTINCT FROM EXCLUDED.sentido
+            ) THEN EXCLUDED.datahora_identificacao
             ELSE gps_ultima_passagem.datahora_identificacao
         END;
 END;

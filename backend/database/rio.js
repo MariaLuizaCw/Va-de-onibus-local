@@ -342,13 +342,8 @@ async function saveRioToGpsUltimaPassagem(records) {
 
         try {
             await dbPool.query(
-                'SELECT fn_atualizar_ultima_passagem($1::jsonb, $2, $3, $4)',
-                [
-                    JSON.stringify(pointsJson),
-                    ULTIMA_PASSAGEM_PROXIMITY_METERS,
-                    ULTIMA_PASSAGEM_WINDOW_MINUTES,
-                    ULTIMA_PASSAGEM_MIN_DURATION_MINUTES
-                ]
+                'SELECT fn_atualizar_ultima_passagem($1::jsonb)',
+                [JSON.stringify(pointsJson)]
             );
             totalProcessed += batch.length;
         } catch (err) {
@@ -569,7 +564,7 @@ async function upsertGpsSentidoBatch(enrichedRecords) {
         
         try {
             const result = await dbPool.query(
-                'SELECT * FROM fn_upsert_gps_sentido_batch($1::jsonb)',
+                'SELECT * FROM fn_upsert_gps_sentido_rio_batch_json($1::jsonb)',
                 [JSON.stringify(batch)]
             );
             if (result.rows.length > 0) {
