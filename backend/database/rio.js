@@ -569,7 +569,7 @@ async function upsertGpsSentidoBatch(enrichedRecords) {
         
         try {
             const result = await dbPool.query(
-                'SELECT * FROM fn_upsert_gps_sentido_batch($1::jsonb)',
+                'SELECT * FROM fn_upsert_gps_sentido_rio_batch_json($1::jsonb)',
                 [JSON.stringify(batch)]
             );
             if (result.rows.length > 0) {
