@@ -11,7 +11,7 @@
         "saveToGpsSentido": true,
         "processarViagens": true,
         "updateInMemoryStore": true,
-        "saveRawHistory": false
+        "saveRawHistory": true
       }
     },
     {

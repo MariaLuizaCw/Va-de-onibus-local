@@ -12,3 +12,4 @@ build
 db_data
 data
 info/
+.python-version

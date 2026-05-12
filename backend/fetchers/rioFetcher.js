@@ -51,8 +51,10 @@ async function fetchRioGPSData(options = {}) {
         
         // Salvar histórico bruto ANTES de qualquer transformação (incluindo deduplicação)
         if (options.saveRawHistory) {
+            const t_hist = Date.now();
             await saveRioGpsApiHistory(records)
                 .catch(err => console.error('[Rio][gps_api_history] Falha:', err.message));
+            console.log(`[Rio][timing] saveRawHistory: ${Date.now() - t_hist}ms`);
         }
         
         // Deduplicar: manter apenas o registro mais recente de cada ordem

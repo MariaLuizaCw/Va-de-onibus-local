@@ -7,8 +7,8 @@ nohup ssh -f -N -R 5434:localhost:5434 marialuiza@galeao.cos.ufrj.br >> /dev/nul
 nohup ssh -f -N -R 3333:localhost:3333 marialuiza@galeao.cos.ufrj.br >> /dev/null 2>&1 &
 
 
-# Importar functions e tabelas
-./scripts/apply-functions.sh container
+# Importar functions e tabelas dev
+./scripts/apply-functions.sh container no
 
 # Compose com arquivo db
 sudo docker compose -f docker-compose.yml.dev up --build db

@@ -211,6 +211,7 @@ async function saveRioGpsApiHistory(records) {
     const finishedAt = new Date();
     const durationMs = finishedAt - startedAt;
     
+
     await logJobExecution({
         jobName: 'saveRioGpsApiHistory',
         parentJob: 'rio-gps-fetch',

@@ -2,17 +2,28 @@
 
 set -e
 
-# Uso: ./apply-functions.sh [container|remote]
+# Uso: ./apply-functions.sh [container|remote] [yes|no]
 #   container - executa via docker exec (padrão)
 #   remote    - executa via psql conectando a uma máquina remota na rede
+#   yes/no    - carregar dados de seed (padrão: yes)
 
 MODE="${1:-container}"
+LOAD_SEEDS="${2:-yes}"
 
 if [[ "$MODE" != "container" && "$MODE" != "remote" ]]; then
   echo "❌ Modo inválido: $MODE"
-  echo "Uso: $0 [container|remote]"
+  echo "Uso: $0 [container|remote] [yes|no]"
   echo "  container - executa via docker exec (padrão)"
   echo "  remote    - executa via psql conectando a uma máquina remota na rede"
+  echo "  yes/no    - carregar dados de seed (padrão: yes)"
+  exit 1
+fi
+
+if [[ "$LOAD_SEEDS" != "yes" && "$LOAD_SEEDS" != "no" ]]; then
+  echo "❌ Opção de seed inválida: $LOAD_SEEDS"
+  echo "Uso: $0 [container|remote] [yes|no]"
+  echo "  yes - carrega dados de seed (padrão)"
+  echo "  no  - pula carregamento de dados de seed"
   exit 1
 fi
 
@@ -100,8 +111,8 @@ done
 echo ""
 echo "✅ Todos os scripts SQL (creates + functions) foram aplicados com sucesso!"
 
-# Carregar dados de seed se existirem
-if [ -d "$SEEDS_DIR" ]; then
+# Carregar dados de seed se existirem E LOAD_SEEDS=yes
+if [ -d "$SEEDS_DIR" ] && [[ "$LOAD_SEEDS" == "yes" ]]; then
   SEED_FILES=$(ls "$SEEDS_DIR"/*.sql 2>/dev/null | sort || true)
   
   if [ -n "$SEED_FILES" ]; then

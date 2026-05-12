@@ -5,12 +5,13 @@
 
 -- -----------------------------------------------------------------------------
 -- fn_atualizar_ultimas_posicoes
--- Atualiza a tabela auxiliar de últimas 5 posições por ônibus/linha
--- Recebe JSON array com posições GPS e mantém apenas as 5 mais recentes distintas
+-- Atualiza a tabela auxiliar de últimas posições por ônibus/linha
+-- Recebe JSON array com posições GPS e mantém apenas as N mais recentes distintas
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_atualizar_ultimas_posicoes(
     p_records jsonb,
-    p_precisao_decimal integer DEFAULT 4  -- 4 casas = ~10m de precisão
+    p_precisao_decimal integer DEFAULT 4,  -- 4 casas = ~10m de precisão
+    p_max_posicoes_historico integer DEFAULT 3  -- máximo de posições distintas por ônibus
 )
 RETURNS TABLE (
     registros_inseridos bigint,
@@ -51,7 +52,7 @@ BEGIN
     
     GET DIAGNOSTICS v_inseridos = ROW_COUNT;
     
-    -- 2. Remover posições antigas, mantendo apenas as 5 mais recentes DISTINTAS por ordem+linha
+    -- 2. Remover posições antigas, mantendo apenas as 3 mais recentes DISTINTAS por ordem+linha
     -- Agrupa por coordenadas arredondadas para garantir distinção espacial
     WITH ranked AS (
         SELECT 
@@ -76,7 +77,7 @@ BEGIN
         ) AS posicoes_distintas
     ),
     ids_to_keep AS (
-        SELECT id FROM ranked WHERE rn <= 5
+        SELECT id FROM ranked WHERE rn <= p_max_posicoes_historico
     )
     DELETE FROM gps_ultimas_posicoes gup
     WHERE EXISTS (
@@ -96,16 +97,19 @@ $$;
 -- fn_processar_sentido_batch
 -- Processa sentido em batch para múltiplos ônibus
 -- Detecção em 2 etapas com prioridade:
---   1. Terminal: cluster de parada ou início de itinerário (prioridade máxima)
---   2. Score: correlação de avanço + distância à rota (fallback)
+--   1. Score: correlação de avanço + distância à rota
+--   2. Fallback: ultima_passagem quando scores ambíguos (diff < 0.2)
 -- ============================================================================
 CREATE OR REPLACE FUNCTION fn_processar_sentido_batch(
     p_records jsonb,
     p_max_distancia_rota_metros numeric DEFAULT 300,
     p_min_pontos_para_score integer DEFAULT 2,
     p_raio_inicio_itinerario_metros numeric DEFAULT 100,
-    p_fallback_diff_min numeric DEFAULT 0.01,
-    p_fallback_diff_max numeric DEFAULT 0.2
+    p_fallback_diff_max numeric DEFAULT 0.35,
+    -- Pesos do score de confiança (devem somar 1.0)
+    p_peso_correlacao numeric DEFAULT 0.6,
+    p_peso_distancia numeric DEFAULT 0.4,
+    p_peso_desvio_padrao numeric DEFAULT 0.0  -- desativado com 3 pontos
 ) RETURNS TABLE (
     ordem text,
     linha text,
@@ -278,34 +282,41 @@ metricas_por_sentido AS (
 -- ============================================================================
 -- ETAPA 5: SCORE DE CONFIANÇA
 -- Calcula score (0..1) e elege o melhor sentido por ônibus
---   40% correlação de avanço (capped >= 0)
+--   50% correlação de avanço (capped >= 0)
 --   40% proximidade à rota (escalonada)
---   20% consistência de distância (escalonada)
+--   10% consistência de distância (escalonada)
 -- ============================================================================
 
 metricas_com_score AS (
     SELECT
         *,
         (
-            GREATEST(corr_avanco, 0) * 0.4
+            GREATEST(corr_avanco, 0) * p_peso_correlacao
             + CASE WHEN dist_media_metros <= 20  THEN 1.0
                    WHEN dist_media_metros <= 50  THEN 0.7
                    WHEN dist_media_metros <= 100 THEN 0.4
                    ELSE 0.1
-              END * 0.4
+              END * p_peso_distancia
             + CASE WHEN dist_stddev_metros <= 5  THEN 1.0
                    WHEN dist_stddev_metros <= 15 THEN 0.7
                    WHEN dist_stddev_metros <= 30 THEN 0.4
                    ELSE 0.1
-              END * 0.2
+              END * p_peso_desvio_padrao
         )::numeric AS score_final
     FROM metricas_por_sentido
 ),
 
 melhor_score AS (
-    SELECT DISTINCT ON (ordem, linha) *
-    FROM metricas_com_score
-    ORDER BY ordem, linha, score_final DESC, dist_media_metros ASC, corr_avanco DESC, itinerario_id ASC
+    SELECT DISTINCT ON (mcs.ordem, mcs.linha) mcs.*
+    FROM metricas_com_score mcs
+    LEFT JOIN gps_sentido gs ON gs.ordem = mcs.ordem AND gs.linha = mcs.linha
+    ORDER BY mcs.ordem, mcs.linha,
+        mcs.score_final DESC,
+        -- Tiebreaker: preferir sentido atual para evitar flip-flop quando scores empatados
+        CASE WHEN gs.sentido_itinerario_id = mcs.itinerario_id THEN 0 ELSE 1 END,
+        mcs.dist_media_metros ASC,
+        mcs.corr_avanco DESC,
+        mcs.itinerario_id ASC
 ),
 
 -- ============================================================================
@@ -314,12 +325,17 @@ melhor_score AS (
 -- ============================================================================
 
 scores_ranked AS (
-    SELECT *,
+    SELECT mcs.*,
         ROW_NUMBER() OVER (
-            PARTITION BY ordem, linha
-            ORDER BY score_final DESC, dist_media_metros ASC, corr_avanco DESC, itinerario_id ASC
+            PARTITION BY mcs.ordem, mcs.linha
+            ORDER BY mcs.score_final DESC,
+                CASE WHEN gs.sentido_itinerario_id = mcs.itinerario_id THEN 0 ELSE 1 END,
+                mcs.dist_media_metros ASC,
+                mcs.corr_avanco DESC,
+                mcs.itinerario_id ASC
         ) AS rn
-    FROM metricas_com_score
+    FROM metricas_com_score mcs
+    LEFT JOIN gps_sentido gs ON gs.ordem = mcs.ordem AND gs.linha = mcs.linha
 ),
 
 score_diferenca AS (
@@ -355,8 +371,10 @@ fallback_ultima_passagem AS (
     LEFT JOIN public.itinerario it ON it.id = gup.itinerario_id
     WHERE gup.sentido IS NOT NULL
       AND gup.label_ultima_passagem = 'Terminal'
-      AND NOW() - gup.datahora_atualizacao <= INTERVAL '15 minutes'
-      AND NOW() - gup.datahora_identificacao <= INTERVAL '5 hours'
+      -- Usar reg.datahora (GPS time) ao invés de NOW() (server time)
+      -- para evitar mismatch de timezone (BRT sem offset vs UTC do servidor)
+      AND reg.datahora - gup.datahora_atualizacao <= INTERVAL '15 minutes'
+      AND reg.datahora - gup.datahora_identificacao <= INTERVAL '5 hours'
 ),
 
 -- ============================================================================
@@ -377,7 +395,7 @@ distancia_ponto_atual AS (
 -- ============================================================================
 -- ETAPA 7: RESULTADO CONSOLIDADO
 -- Une terminal + score + distância + fallback e determina método e sentido final
--- Prioridade: em_terminal > sem_historico > poucos_pontos > garagem
+-- Prioridade: sem_historico > poucos_pontos > garagem
 --             > fallback_ultima_passagem (se diff < 0.2) > score
 -- ============================================================================
 
@@ -392,47 +410,40 @@ resultado AS (
         
         -- Método de detecção
         CASE
-            WHEN dt.tipo_deteccao_terminal IS NOT NULL  THEN 'em_terminal'
             WHEN sc.ordem IS NULL                       THEN 'sem_historico'
             WHEN sc.num_pontos < p_min_pontos_para_score THEN 'poucos_pontos'
             WHEN dpa.dist_metros > p_max_distancia_rota_metros THEN 'garagem_por_distancia'
-            WHEN sd.diff_scores < p_fallback_diff_max AND sd.diff_scores > p_fallback_diff_min AND fup.ordem IS NOT NULL THEN 'fallback_ultima_passagem'
+            WHEN sd.diff_scores < p_fallback_diff_max AND fup.ordem IS NOT NULL THEN 'fallback_ultima_passagem'
             ELSE 'score'
         END AS metodo_deteccao,
         
         -- Sentido determinado
         CASE
-            WHEN dt.tipo_deteccao_terminal IS NOT NULL  THEN dt.sentido_terminal
             WHEN sc.ordem IS NULL                       THEN NULL
             WHEN sc.num_pontos < p_min_pontos_para_score THEN NULL
             WHEN dpa.dist_metros > p_max_distancia_rota_metros THEN 'GARAGEM'
-            WHEN sd.diff_scores < p_fallback_diff_max AND sd.diff_scores > p_fallback_diff_min AND fup.ordem IS NOT NULL THEN fup.sentido
+            WHEN sd.diff_scores < p_fallback_diff_max AND fup.ordem IS NOT NULL THEN fup.sentido
             ELSE sc.sentido
         END AS sentido_determinado,
         
         -- Itinerário final
         CASE
-            WHEN dt.tipo_deteccao_terminal IS NOT NULL  THEN dt.itinerario_id_terminal
             WHEN sc.ordem IS NULL                       THEN NULL
             WHEN sc.num_pontos < p_min_pontos_para_score THEN NULL
             WHEN dpa.dist_metros > p_max_distancia_rota_metros THEN NULL
-            WHEN sd.diff_scores < p_fallback_diff_max AND sd.diff_scores > p_fallback_diff_min AND fup.ordem IS NOT NULL THEN fup.itinerario_id
+            WHEN sd.diff_scores < p_fallback_diff_max AND fup.ordem IS NOT NULL THEN fup.itinerario_id
             ELSE sc.itinerario_id
         END AS itinerario_id_final,
         
-        -- Route name (terminal > fallback > score > linha)
+        -- Route name (fallback > score > linha)
         COALESCE(
-            CASE WHEN dt.tipo_deteccao_terminal IS NOT NULL THEN dt.route_name_terminal END,
-            CASE WHEN sd.diff_scores < p_fallback_diff_max AND sd.diff_scores > p_fallback_diff_min AND fup.ordem IS NOT NULL THEN fup.route_name_fallback END,
+            CASE WHEN sd.diff_scores < p_fallback_diff_max AND fup.ordem IS NOT NULL THEN fup.route_name_fallback END,
             sc.route_name,
             reg.linha
         ) AS route_name,
         
         -- Score de confiança
-        CASE
-            WHEN dt.tipo_deteccao_terminal IS NOT NULL THEN 1.0::numeric
-            ELSE COALESCE(sc.score_final, 0)
-        END AS score_final,
+        COALESCE(sc.score_final, 0) AS score_final,
         
         COALESCE(dpa.dist_metros, 0) AS dist_rota_metros,
         
@@ -541,15 +552,6 @@ SELECT
         ),
         'distancia_rota_metros', ROUND(res.dist_rota_metros, 2),
         'detalhes_metodo', CASE
-            -- Terminal: informações da detecção por cluster/início de itinerário
-            WHEN res.metodo_deteccao = 'em_terminal' THEN jsonb_build_object(
-                'tipo', res.tipo_deteccao_terminal,
-                'cluster_unique_id', res.cluster_unique_id,
-                'distancia_terminal_metros', ROUND(COALESCE(res.dist_terminal_metros, 0), 2),
-                'raio_cluster_metros', res.raio_cluster_metros,
-                'terminal_latitude', res.terminal_latitude,
-                'terminal_longitude', res.terminal_longitude
-            )
             -- Score: métricas da análise de posições GPS
             WHEN res.metodo_deteccao = 'score' THEN jsonb_build_object(
                 'num_pontos', COALESCE(res.num_pontos, 0),
