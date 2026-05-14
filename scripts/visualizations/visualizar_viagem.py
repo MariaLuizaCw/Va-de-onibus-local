@@ -33,7 +33,7 @@ CORES = {
 def get_db_connection():
     """Conecta ao banco usando variáveis de ambiente ou .env"""
     # Tenta carregar do .env se existir
-    env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+    env_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
     if os.path.exists(env_path):
         with open(env_path) as f:
             for line in f:

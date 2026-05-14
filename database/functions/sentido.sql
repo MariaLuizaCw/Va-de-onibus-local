@@ -11,7 +11,7 @@
 CREATE OR REPLACE FUNCTION fn_atualizar_ultimas_posicoes(
     p_records jsonb,
     p_precisao_decimal integer DEFAULT 4,  -- 4 casas = ~10m de precisão
-    p_max_posicoes_historico integer DEFAULT 3  -- máximo de posições distintas por ônibus
+    p_max_posicoes_historico integer DEFAULT 5  -- máximo de posições distintas por ônibus
 )
 RETURNS TABLE (
     registros_inseridos bigint,
@@ -52,7 +52,7 @@ BEGIN
     
     GET DIAGNOSTICS v_inseridos = ROW_COUNT;
     
-    -- 2. Remover posições antigas, mantendo apenas as 3 mais recentes DISTINTAS por ordem+linha
+    -- 2. Remover posições antigas, mantendo apenas as 5 mais recentes DISTINTAS por ordem+linha
     -- Agrupa por coordenadas arredondadas para garantir distinção espacial
     WITH ranked AS (
         SELECT 
@@ -109,7 +109,7 @@ CREATE OR REPLACE FUNCTION fn_processar_sentido_batch(
     -- Pesos do score de confiança (devem somar 1.0)
     p_peso_correlacao numeric DEFAULT 0.6,
     p_peso_distancia numeric DEFAULT 0.4,
-    p_peso_desvio_padrao numeric DEFAULT 0.0  -- desativado com 3 pontos
+    p_peso_desvio_padrao numeric DEFAULT 0.0  
 ) RETURNS TABLE (
     ordem text,
     linha text,
